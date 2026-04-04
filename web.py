@@ -26,6 +26,9 @@ import calendar
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 
+# Initialise les tables au démarrage (gunicorn ou direct)
+db.init_db()
+
 
 # ── PWA ────────────────────────────────────────────────────────────────────────
 @app.route('/sw.js')
@@ -871,6 +874,5 @@ def log_weight_route():
 
 
 if __name__ == "__main__":
-    db.init_db()
     port = int(os.getenv("WEB_PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
