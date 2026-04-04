@@ -1,0 +1,10 @@
+.env
+coach.db
+*.db
+*.sqlite
+*.log
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.DS_Store

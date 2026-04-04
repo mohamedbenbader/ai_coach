@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Full bleed background for maskable (safe zone = center 80%) -->
+  <rect width="512" height="512" fill="#1a1d2e"/>
+  <!-- Dumbbell bar -->
+  <rect x="156" y="232" width="200" height="48" rx="24" fill="#3b82f6"/>
+  <!-- Left weight -->
+  <rect x="104" y="188" width="64" height="136" rx="20" fill="#a78bfa"/>
+  <!-- Right weight -->
+  <rect x="344" y="188" width="64" height="136" rx="20" fill="#a78bfa"/>
+  <!-- Left collar -->
+  <rect x="162" y="208" width="30" height="96" rx="10" fill="#60a5fa"/>
+  <!-- Right collar -->
+  <rect x="320" y="208" width="30" height="96" rx="10" fill="#60a5fa"/>
+</svg>

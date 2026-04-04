@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CoachBot — Connexion</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0f1117;
+        --surface: #1a1d2e;
+        --surface2: #22263a;
+        --primary: #6c63ff;
+        --primary-hover: #857dff;
+        --text: #e8eaf6;
+        --muted: #9095b5;
+        --border: #2e3252;
+        --error: #ff5c72;
+        --success: #4caf50;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", system-ui, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 2.5rem 2rem;
+        width: 100%;
+        max-width: 420px;
+      }
+
+      .logo {
+        text-align: center;
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+      }
+
+      h1 {
+        text-align: center;
+        font-size: 1.4rem;
+        font-weight: 700;
+        margin-bottom: 0.3rem;
+      }
+
+      .subtitle {
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 2rem;
+      }
+
+      /* Tabs */
+      .tabs {
+        display: flex;
+        background: var(--surface2);
+        border-radius: 10px;
+        padding: 4px;
+        margin-bottom: 1.8rem;
+        gap: 4px;
+      }
+
+      .tab-btn {
+        flex: 1;
+        padding: 0.55rem;
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .tab-btn.active {
+        background: var(--primary);
+        color: #fff;
+      }
+
+      /* Form */
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-bottom: 0.4rem;
+      }
+
+      input[type="text"],
+      input[type="password"] {
+        width: 100%;
+        padding: 0.7rem 0.9rem;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 0.95rem;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+
+      input:focus {
+        border-color: var(--primary);
+      }
+
+      .btn-primary {
+        width: 100%;
+        padding: 0.75rem;
+        background: var(--primary);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 0.5rem;
+        transition: background 0.2s;
+      }
+
+      .btn-primary:hover {
+        background: var(--primary-hover);
+      }
+      .btn-primary:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .error-msg {
+        background: rgba(255, 92, 114, 0.12);
+        border: 1px solid var(--error);
+        color: var(--error);
+        border-radius: 8px;
+        padding: 0.6rem 0.9rem;
+        font-size: 0.88rem;
+        margin-bottom: 1rem;
+        display: none;
+      }
+
+      .error-msg.show {
+        display: block;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 0.78rem;
+        margin-top: 0.9rem;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">🏋️</div>
+      <h1>CoachBot</h1>
+      <p class="subtitle">Votre coach fitness personnel</p>
+
+      <div class="tabs">
+        <button
+          class="tab-btn active"
+          id="tab-login"
+          onclick="switchTab('login')"
+        >
+          Connexion
+        </button>
+        <button
+          class="tab-btn"
+          id="tab-register"
+          onclick="switchTab('register')"
+        >
+          Inscription
+        </button>
+      </div>
+
+      <div id="error-msg" class="error-msg"></div>
+
+      <!-- Login form -->
+      <form id="form-login" onsubmit="submitLogin(event)">
+        <div class="form-group">
+          <label for="login-username">Nom d'utilisateur</label>
+          <input
+            type="text"
+            id="login-username"
+            autocomplete="username"
+            autocapitalize="none"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Mot de passe</label>
+          <input
+            type="password"
+            id="login-password"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+        <button type="submit" class="btn-primary" id="btn-login">
+          Connexion
+        </button>
+      </form>
+
+      <!-- Register form -->
+      <form
+        id="form-register"
+        onsubmit="submitRegister(event)"
+        style="display: none"
+      >
+        <div class="form-group">
+          <label for="reg-username"
+            >Nom d'utilisateur
+            <span style="color: var(--muted)">(min 3 caractères)</span></label
+          >
+          <input
+            type="text"
+            id="reg-username"
+            autocomplete="username"
+            autocapitalize="none"
+            required
+            minlength="3"
+          />
+        </div>
+        <div class="form-group">
+          <label for="reg-password"
+            >Mot de passe
+            <span style="color: var(--muted)">(min 6 caractères)</span></label
+          >
+          <input
+            type="password"
+            id="reg-password"
+            autocomplete="new-password"
+            required
+            minlength="6"
+          />
+        </div>
+        <div class="form-group">
+          <label for="reg-password2">Confirmer le mot de passe</label>
+          <input
+            type="password"
+            id="reg-password2"
+            autocomplete="new-password"
+            required
+            minlength="6"
+          />
+        </div>
+        <button type="submit" class="btn-primary" id="btn-register">
+          Créer le compte
+        </button>
+      </form>
+
+      <p class="hint">Vos données sont stockées localement.</p>
+    </div>
+
+    <script>
+      function switchTab(tab) {
+        const isLogin = tab === "login";
+        document.getElementById("form-login").style.display = isLogin
+          ? ""
+          : "none";
+        document.getElementById("form-register").style.display = isLogin
+          ? "none"
+          : "";
+        document
+          .getElementById("tab-login")
+          .classList.toggle("active", isLogin);
+        document
+          .getElementById("tab-register")
+          .classList.toggle("active", !isLogin);
+        hideError();
+      }
+
+      function showError(msg) {
+        const el = document.getElementById("error-msg");
+        el.textContent = msg;
+        el.classList.add("show");
+      }
+
+      function hideError() {
+        document.getElementById("error-msg").classList.remove("show");
+      }
+
+      async function submitLogin(e) {
+        e.preventDefault();
+        hideError();
+        const btn = document.getElementById("btn-login");
+        btn.disabled = true;
+        btn.textContent = "Connexion…";
+
+        const username = document.getElementById("login-username").value.trim();
+        const password = document.getElementById("login-password").value;
+
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            window.location.href = "/";
+          } else {
+            showError(data.error || "Erreur de connexion");
+          }
+        } catch {
+          showError("Erreur réseau");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Connexion";
+        }
+      }
+
+      async function submitRegister(e) {
+        e.preventDefault();
+        hideError();
+
+        const username = document.getElementById("reg-username").value.trim();
+        const password = document.getElementById("reg-password").value;
+        const password2 = document.getElementById("reg-password2").value;
+
+        if (password !== password2) {
+          showError("Les mots de passe ne correspondent pas");
+          return;
+        }
+
+        const btn = document.getElementById("btn-register");
+        btn.disabled = true;
+        btn.textContent = "Création…";
+
+        try {
+          const res = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            window.location.href = "/";
+          } else {
+            showError(data.error || "Erreur lors de la création du compte");
+          }
+        } catch {
+          showError("Erreur réseau");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Créer le compte";
+        }
+      }
+    </script>
+  </body>
+</html>
