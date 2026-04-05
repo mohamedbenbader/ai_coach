@@ -36,8 +36,8 @@ def generate_daily_meals(targets: dict, day_name: str,
     ingredients = ""
 
     prompt = f"""Plan repas pour {day_name}.
-Objectif : {targets['calories']} kcal | {targets['protein_g']}g P | {targets['carbs_g']}g G | {targets['fat_g']}g L.
-{avoid}{ingredients}
+Objectif STRICT à respecter : {targets['calories']} kcal | {targets['protein_g']}g P | {targets['carbs_g']}g G | {targets['fat_g']}g L.
+{avoid}Inspiration : mélange varié et moderne — méditerranéen, asiatique (thaï, japonais, coréen), mexicain, libanais, américain healthy, français revisité. Noms de plats concrets et appétissants. Chaque repas doit avoir une identité différente.
 Format STRICT (pas d'intro) :
 
 🌅 Petit-déjeuner (Xkcal | Xg P | Xg G | Xg L)
@@ -74,7 +74,8 @@ def regenerate_single_meal(meal_type: str, day_name: str,
     avoid = f"\nÉvite de répéter : {other_meals[:200]}" if other_meals else ""
 
     prompt = f"""Génère uniquement le {label} pour {day_name}.
-Budget macros à respecter : {remaining['calories']} kcal | {remaining['protein_g']}g P | {remaining['carbs_g']}g G | {remaining['fat_g']}g L.{avoid}
+Budget macros STRICT à respecter : {remaining['calories']} kcal | {remaining['protein_g']}g P | {remaining['carbs_g']}g G | {remaining['fat_g']}g L.{avoid}
+Inspiration : mélange varié et moderne — méditerranéen, asiatique, mexicain, libanais, américain healthy, français revisité. Nom de plat concret et appétissant.
 Format STRICT (2-3 lignes, pas d'intro) :
 {emoji} {label} (Xkcal | Xg P | Xg G | Xg L)
 [description du repas]"""
