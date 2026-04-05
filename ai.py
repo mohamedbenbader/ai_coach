@@ -104,7 +104,7 @@ Personne : {profile.get('weight_kg')} kg, objectif recomposition corporelle.
 Macros cibles :
 Jours entraînement (0=Lundi, 1=Mardi, 2=Mercredi, 3=Jeudi, 5=Samedi, 6=Dimanche) : {targets_train['calories']} kcal | {targets_train['protein_g']}g P | {targets_train['carbs_g']}g G | {targets_train['fat_g']}g L
 Jour repos (4=Vendredi) : {targets_rest['calories']} kcal | {targets_rest['protein_g']}g P | {targets_rest['carbs_g']}g G | {targets_rest['fat_g']}g L
-Cuisine française/méditerranéenne. Variété de protéines (poulet, bœuf, poisson, œufs, thon, fromage blanc, yaourt grec). Évite de répéter le même plat plusieurs jours.
+Inspiration culinaire : mélange varié et moderne — méditerranéen, asiatique (thaï, japonais, coréen), mexicain, libanais, américain healthy, français revisité, comfort food allégé. Chaque jour doit avoir une identité culinaire différente. Noms de plats concrets et appétissants (ex: "Buddha bowl saumon avocat", "Poulet rôti patates douces", "Pad thaï crevettes", "Tacos bowl bœuf chipotle", "Salade niçoise revisitée"). Variété de protéines (poulet, bœuf, saumon, crevettes, thon, œufs, tofu, fromage blanc). Évite absolument de répéter le même plat ou la même base sur la semaine.
 
 Réponds UNIQUEMENT avec du JSON valide :
 [

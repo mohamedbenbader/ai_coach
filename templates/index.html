@@ -4903,60 +4903,65 @@
         rest_days: [],
       };
 
-      // Construit les pill-boutons de sélection du jour de départ
+      // Construit les pill-boutons de sélection du jour de départ (lundis uniquement)
       function _buildStartDayPills(containerId, storeFn) {
-        const DAY_FR = [
-          "Lundi",
-          "Mardi",
-          "Mercredi",
-          "Jeudi",
-          "Vendredi",
-          "Samedi",
-          "Dimanche",
-        ];
         const container = document.getElementById(containerId);
         if (!container) return;
-        const today = new Date();
-        // JS getDay(): 0=dim… on convertit en 0=lun
-        const todayJsDay = today.getDay();
-        const todayIso = today.toLocaleDateString("fr-CA"); // YYYY-MM-DD locale-safe
-
         container.innerHTML = "";
-        // Affiche les jours restants de la semaine à partir d'aujourd'hui
-        for (let offset = 0; offset <= 6; offset++) {
-          const d = new Date(today);
-          d.setDate(today.getDate() + offset);
-          const jsDay = d.getDay();
-          const isoStr = d.toLocaleDateString("fr-CA");
-          // dow : 0=lun…6=dim
-          const dow = jsDay === 0 ? 6 : jsDay - 1;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Trouver le lundi de la semaine courante
+        const dayOfWeek = today.getDay(); // 0=dim
+        const daysToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const thisMonday = new Date(today);
+        thisMonday.setDate(today.getDate() + daysToMonday);
+
+        // Afficher 4 lundis consécutifs
+        let defaultSet = false;
+        for (let week = 0; week < 4; week++) {
+          const monday = new Date(thisMonday);
+          monday.setDate(thisMonday.getDate() + week * 7);
+          const isoStr = monday.toLocaleDateString("fr-CA");
+          const isPast = monday < today;
 
           const pill = document.createElement("div");
-          pill.className = "ob-choice" + (offset === 0 ? " selected" : "");
-          pill.style.cssText =
-            "min-width:100px;padding:.5rem .9rem;font-size:.88rem;";
-          const label =
-            offset === 0
-              ? `Aujourd'hui (${DAY_FR[dow]})`
-              : offset === 1
-                ? `Demain (${DAY_FR[dow]})`
-                : DAY_FR[dow];
-          pill.innerHTML = `<span class="ob-choice-icon">${offset === 0 ? "📅" : "📆"}</span>${label}`;
-          pill.dataset.isoDate = isoStr;
-          pill.onclick = () => {
-            container
-              .querySelectorAll(".ob-choice")
-              .forEach((c) => c.classList.remove("selected"));
-            pill.classList.add("selected");
-            storeFn(isoStr);
-          };
-          container.appendChild(pill);
+          pill.className = "ob-choice";
+          pill.style.cssText = "min-width:120px;padding:.5rem .9rem;font-size:.88rem;";
 
-          // S'arrêter au dimanche (fin de semaine)
-          if (dow === 6) break;
+          if (isPast) {
+            pill.style.opacity = "0.4";
+            pill.style.cursor = "not-allowed";
+          }
+
+          const diffDays = Math.round((monday - today) / 86400000);
+          const label = week === 0
+            ? (isPast ? `Lundi passé` : diffDays === 0 ? `Aujourd'hui` : `Ce lundi`)
+            : week === 1
+              ? `Lundi prochain`
+              : `Dans ${week} semaines`;
+
+          const dateLabel = monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+          pill.innerHTML = `<span class="ob-choice-icon">📅</span>${label}<br><small style="color:var(--muted)">${dateLabel}</small>`;
+          pill.dataset.isoDate = isoStr;
+
+          if (!isPast) {
+            pill.onclick = () => {
+              container.querySelectorAll(".ob-choice").forEach((c) => c.classList.remove("selected"));
+              pill.classList.add("selected");
+              storeFn(isoStr);
+            };
+            // Sélectionner le premier lundi non passé par défaut
+            if (!defaultSet) {
+              pill.classList.add("selected");
+              storeFn(isoStr);
+              defaultSet = true;
+            }
+          }
+
+          container.appendChild(pill);
         }
-        // Défaut = aujourd'hui
-        storeFn(todayIso);
       }
 
       function obInitStartDay() {

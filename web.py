@@ -874,5 +874,5 @@ def log_weight_route():
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("WEB_PORT", 5000))
+    port = int(os.getenv("WEB_PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=False)
