@@ -49,10 +49,23 @@ def init_db():
             total_phases INTEGER DEFAULT 1,
             macros_training TEXT DEFAULT '{}',
             macros_rest TEXT DEFAULT '{}',
+            meal_diet TEXT DEFAULT '[]',
+            meal_budget TEXT DEFAULT 'equilibre',
             created_at DATE DEFAULT CURRENT_DATE,
             UNIQUE(user_id)
         )
     """)
+
+    # Migration : ajouter les colonnes si elles n'existent pas encore (instances existantes)
+    for col, definition in [
+        ("meal_diet",   "TEXT DEFAULT '[]'"),
+        ("meal_budget", "TEXT DEFAULT 'equilibre'"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE profile ADD COLUMN {col} {definition}")
+            conn.commit()
+        except Exception:
+            conn.rollback()  # colonne déjà présente — rollback requis par PostgreSQL
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS weight_logs (
@@ -149,6 +162,16 @@ def init_db():
             user_id INTEGER NOT NULL DEFAULT 1,
             date TEXT NOT NULL,
             UNIQUE(user_id, date)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS meal_checkins (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            date TEXT NOT NULL,
+            meal_type TEXT NOT NULL,
+            UNIQUE(user_id, date, meal_type)
         )
     """)
 
@@ -269,11 +292,12 @@ def save_profile(data: dict, user_id: int = 1):
     c.execute("""
         INSERT INTO profile (user_id, name, age, weight_kg, height_cm, goal_weight_kg,
             activity_level, training_days, goal, sexe, job_type, gym_sessions_per_week,
-            extra_sport, extra_sports, fitness_level, rest_days, macros_training, macros_rest)
+            extra_sport, extra_sports, fitness_level, rest_days, macros_training, macros_rest,
+            meal_diet, meal_budget)
         VALUES (%(user_id)s, %(name)s, %(age)s, %(weight_kg)s, %(height_cm)s, %(goal_weight_kg)s,
             %(activity_level)s, %(training_days)s, %(goal)s, %(sexe)s, %(job_type)s,
             %(gym_sessions_per_week)s, %(extra_sport)s, %(extra_sports)s, %(fitness_level)s,
-            %(rest_days)s, %(macros_training)s, %(macros_rest)s)
+            %(rest_days)s, %(macros_training)s, %(macros_rest)s, %(meal_diet)s, %(meal_budget)s)
         ON CONFLICT (user_id) DO UPDATE SET
             name = EXCLUDED.name,
             age = EXCLUDED.age,
@@ -291,7 +315,9 @@ def save_profile(data: dict, user_id: int = 1):
             fitness_level = EXCLUDED.fitness_level,
             rest_days = EXCLUDED.rest_days,
             macros_training = EXCLUDED.macros_training,
-            macros_rest = EXCLUDED.macros_rest
+            macros_rest = EXCLUDED.macros_rest,
+            meal_diet = EXCLUDED.meal_diet,
+            meal_budget = EXCLUDED.meal_budget
     """, {
         **data,
         "user_id": user_id,
@@ -307,6 +333,8 @@ def save_profile(data: dict, user_id: int = 1):
         "rest_days": rest,
         "macros_training": macros_training,
         "macros_rest": macros_rest,
+        "meal_diet":   json.dumps(data.get("meal_diet", [])),
+        "meal_budget": data.get("meal_budget", "equilibre"),
     })
     conn.commit()
     conn.close()
@@ -660,6 +688,64 @@ def get_done_dates(week_start: str, user_id: int = 1) -> set:
     rows = c.fetchall()
     conn.close()
     return {r["date"] for r in rows}
+
+
+# ── Check-in repas ───────────────────────────────────────────────────────────
+
+def toggle_meal_checkin(log_date: str, meal_type: str, user_id: int = 1) -> bool:
+    """Toggle le check-in d'un repas. Retourne True si maintenant coché, False sinon."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(
+        "SELECT id FROM meal_checkins WHERE user_id = %s AND date = %s AND meal_type = %s",
+        (user_id, log_date, meal_type)
+    )
+    existing = c.fetchone()
+    if existing:
+        c.execute(
+            "DELETE FROM meal_checkins WHERE user_id = %s AND date = %s AND meal_type = %s",
+            (user_id, log_date, meal_type)
+        )
+        checked = False
+    else:
+        c.execute(
+            "INSERT INTO meal_checkins (user_id, date, meal_type) VALUES (%s, %s, %s)",
+            (user_id, log_date, meal_type)
+        )
+        checked = True
+    conn.commit()
+    conn.close()
+    return checked
+
+
+def get_meal_checkins(log_date: str, user_id: int = 1) -> set:
+    """Retourne l'ensemble des meal_type cochés pour une date."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(
+        "SELECT meal_type FROM meal_checkins WHERE user_id = %s AND date = %s",
+        (user_id, log_date)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return {r["meal_type"] for r in rows}
+
+
+def get_week_meal_checkins(week_start: str, user_id: int = 1) -> dict:
+    """Retourne {date: {meal_type, ...}} pour toute la semaine."""
+    conn = get_conn()
+    c = _cur(conn)
+    week_end = str(date.fromisoformat(week_start) + timedelta(days=6))
+    c.execute(
+        "SELECT date, meal_type FROM meal_checkins WHERE user_id = %s AND date >= %s AND date <= %s",
+        (user_id, week_start, week_end)
+    )
+    rows = c.fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        result.setdefault(r["date"], set()).add(r["meal_type"])
+    return result
 
 
 # ── Bilan hebdomadaire ────────────────────────────────────────────────────────

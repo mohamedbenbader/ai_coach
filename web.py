@@ -242,6 +242,8 @@ def couple_setup():
             "training_days":         "0,1,2,3,5,6",
             "extra_sports":          data.get("extra_sports", []),
             "rest_days":             data.get("rest_days", []),
+            "meal_diet":             data.get("meal_diet", main_profile.get("meal_diet", [])) if main_profile else [],
+            "meal_budget":           data.get("meal_budget", main_profile.get("meal_budget", "equilibre")) if main_profile else "equilibre",
         }
         db.save_profile(partner_payload, user_id=partner_id)
         db.log_weight(partner_payload["weight_kg"], user_id=partner_id)
@@ -364,6 +366,16 @@ def save_profile_route():
         max_rest = 7 - max(1, min(7, int(data.get("gym_sessions_per_week", 3))))
         validated_rest = validated_rest[:max_rest]
 
+        valid_diets  = ("vegetarien", "vegetalien", "sans_porc", "sans_gluten", "sans_lactose", "sans_alcool")
+        valid_budgets = ("economique", "equilibre", "premium")
+
+        raw_diet = data.get("meal_diet", [])
+        if isinstance(raw_diet, str):
+            import json as _json
+            try: raw_diet = _json.loads(raw_diet)
+            except Exception: raw_diet = []
+        validated_diet = [d for d in raw_diet if d in valid_diets]
+
         payload = {
             "name":                  str(data["name"]).strip(),
             "age":                   int(data["age"]),
@@ -379,6 +391,8 @@ def save_profile_route():
             "extra_sports":          validated_sports,
             "fitness_level":         data.get("fitness_level", "intermediaire") if data.get("fitness_level") in valid_levels else "intermediaire",
             "rest_days":             validated_rest,
+            "meal_diet":             validated_diet,
+            "meal_budget":           data.get("meal_budget", "equilibre") if data.get("meal_budget") in valid_budgets else "equilibre",
         }
         db.save_profile(payload, user_id=uid)
         db.log_weight(payload["weight_kg"], user_id=uid)
@@ -777,6 +791,35 @@ def toggle_session_done():
     return jsonify({"ok": True, "done": done})
 
 
+@app.route("/api/meal_checkin", methods=["POST"])
+def meal_checkin():
+    uid = current_user_id()
+    data = request.get_json() or {}
+    log_date = data.get("date", str(date.today()))
+    meal_type = data.get("meal_type", "")
+    valid_meals = {"petit_dejeuner", "dejeuner", "collation", "diner"}
+    if meal_type not in valid_meals:
+        return jsonify({"ok": False, "error": "meal_type invalide"}), 400
+    try:
+        date.fromisoformat(log_date)
+    except ValueError:
+        return jsonify({"ok": False, "error": "date invalide"}), 400
+    checked = db.toggle_meal_checkin(log_date, meal_type, user_id=uid)
+    return jsonify({"ok": True, "checked": checked, "meal_type": meal_type})
+
+
+@app.route("/api/meal_checkins")
+def get_meal_checkins():
+    uid = current_user_id()
+    log_date = request.args.get("date", str(date.today()))
+    try:
+        date.fromisoformat(log_date)
+    except ValueError:
+        return jsonify({"ok": False, "error": "date invalide"}), 400
+    checked = db.get_meal_checkins(log_date, user_id=uid)
+    return jsonify({"date": log_date, "checked": list(checked)})
+
+
 @app.route("/api/substitute_exercise", methods=["POST"])
 def substitute_exercise():
     from ai import generate_exercise_substitutes
@@ -1067,7 +1110,13 @@ def regenerate_meal():
         "fat_g":     max(5,   total_targets["fat_g"]     - used["fat_g"]),
     }
 
-    new_meal = regenerate_single_meal(meal_type, day_name, remaining, current_text)
+    p_diet   = p.get("meal_diet", [])
+    if isinstance(p_diet, str):
+        try: p_diet = json.loads(p_diet)
+        except Exception: p_diet = []
+    p_budget = p.get("meal_budget", "equilibre")
+    new_meal = regenerate_single_meal(meal_type, day_name, remaining, current_text,
+                                      meal_diet=p_diet, meal_budget=p_budget)
     # new_meal = "🍽 Déjeuner (Xkcal | ...)\ndescription"
     new_desc_lines = new_meal.split("\n")[1:]
     new_desc = "\n".join(new_desc_lines).strip()
@@ -1368,53 +1417,172 @@ def _generate_week_meals_only(profile: dict, week_start: str, user_id: int = 1,
 
     days_needed = list(range(from_day, 7))  # ex. [3,4,5,6] si démarrage jeudi
 
-    prompt = f"""Génère des descriptions de repas variés et modernes pour les jours {', '.join(str(d) for d in days_needed)} (0=Lundi … 6=Dimanche).
-Cuisine variée : méditerranéen, asiatique (thaï, japonais, coréen), mexicain, libanais, américain healthy, français revisité.
-Chaque jour doit avoir une identité culinaire différente. Noms de plats concrets avec ingrédients principaux et quantités en grammes.
-Variété de protéines (poulet, bœuf, saumon, crevettes, thon, œufs, tofu). Évite de répéter le même plat.
+    # Contraintes régime + budget
+    from ai import _diet_budget_hint, _clean_desc
+    meal_diet   = profile.get("meal_diet", [])
+    if isinstance(meal_diet, str):
+        try: meal_diet = json.loads(meal_diet)
+        except Exception: meal_diet = []
+    meal_budget = profile.get("meal_budget", "equilibre")
+    diet_hint = _diet_budget_hint(meal_diet, meal_budget)
+
+    # Construire les cibles par jour pour guider l'IA
+    day_targets = {}
+    for day in days_needed:
+        is_rest = day in rest_days_set
+        day_targets[day] = targets_rest if is_rest else targets_train
+
+    days_targets_str = "\n".join(
+        f"  Jour {d} ({DAYS_FR[d]}) : ~{day_targets[d]['calories']}kcal | ~{day_targets[d]['protein_g']}g prot | ~{day_targets[d]['carbs_g']}g gluc | ~{day_targets[d]['fat_g']}g lip"
+        for d in days_needed
+    )
+
+    prompt = f"""Génère des repas variés et modernes pour {len(days_needed)} jour(s). Chaque repas doit respecter les cibles nutritionnelles du jour.
+{diet_hint}
+Cibles nutritionnelles par jour (à répartir entre les 4 repas) :
+{days_targets_str}
+
+Cuisine variée : méditerranéen, asiatique, mexicain, libanais, américain healthy, français revisité.
+Ingrédients concrets avec quantités en grammes. Variété de protéines. Chaque jour = identité culinaire différente.
+
+Pour chaque repas :
+1. Propose un plat avec ingrédients et quantités précises en grammes
+2. Calcule les macros RÉELS en estimant chaque ingrédient séparément au 100g puis en appliquant la quantité
 
 Réponds UNIQUEMENT en JSON valide, tableau de {len(days_needed)} objet(s) :
 [
-  {{"day": {days_needed[0]}, "petit_dejeuner": "description...", "dejeuner": "description...", "collation": "description...", "diner": "description..."}},
+  {{
+    "day": {days_needed[0]},
+    "petit_dejeuner": {{"desc": "Œufs brouillés 3 (150g) + pain complet 60g + fromage blanc 150g", "kcal": 395, "p": 27, "g": 38, "l": 14}},
+    "dejeuner":       {{"desc": "Poulet grillé 180g + riz basmati cuit 150g + haricots verts 120g", "kcal": 485, "p": 46, "g": 52, "l": 8}},
+    "collation":      {{"desc": "Yaourt grec nature 150g + myrtilles 100g + amandes 20g",            "kcal": 310, "p": 14, "g": 28, "l": 16}},
+    "diner":          {{"desc": "Saumon pavé 200g + patates douces 180g + brocoli vapeur 150g",      "kcal": 560, "p": 43, "g": 54, "l": 17}}
+  }},
   ...
 ]"""
 
-    raw = _call(prompt, model=HAIKU, max_tokens=3000)
-    try:
-        s = raw.find("[")
-        e = raw.rfind("]") + 1
-        entries = json.loads(raw[s:e])
-    except Exception:
-        entries = []
+    def _parse_json_entries(text):
+        s = text.find("[")
+        e = text.rfind("]") + 1
+        if s < 0 or e <= s:
+            return None
+        try:
+            return json.loads(text[s:e])
+        except Exception:
+            # Tentative de récupération : trouver les objets complets
+            partial = text[s:]
+            last = partial.rfind("},")
+            if last < 0:
+                last = partial.rfind("}")
+            if last >= 0:
+                try:
+                    return json.loads(partial[:last + 1] + "]")
+                except Exception:
+                    pass
+        return None
 
-    default_desc = {
-        "petit_dejeuner": "Œufs brouillés + pain complet + fromage blanc",
-        "dejeuner": "Poulet grillé + riz complet + légumes vapeur",
-        "collation": "Yaourt grec + fruits rouges + amandes",
-        "diner": "Saumon + patates douces + brocoli",
+    raw = _call(prompt, model=HAIKU, max_tokens=5000)
+    entries = _parse_json_entries(raw)
+
+    if not entries:
+        logging.warning("[generate_week_meals] attempt 1 failed, retrying with simpler prompt…")
+        simple_prompt = f"""Génère des repas pour les jours {', '.join(str(d) for d in days_needed)}.
+{diet_hint}
+Pour chaque jour, propose 4 repas avec description et macros estimés réels.
+JSON uniquement :
+[
+  {{
+    "day": {days_needed[0]},
+    "petit_dejeuner": {{"desc": "Œufs 3 + pain 60g + yaourt 100g", "kcal": 380, "p": 25, "g": 40, "l": 12}},
+    "dejeuner":       {{"desc": "Poulet 180g + riz 100g + légumes 150g", "kcal": 520, "p": 42, "g": 55, "l": 10}},
+    "collation":      {{"desc": "Yaourt grec 150g + amandes 20g", "kcal": 240, "p": 14, "g": 18, "l": 12}},
+    "diner":          {{"desc": "Saumon 200g + brocoli 150g + riz 80g", "kcal": 550, "p": 40, "g": 50, "l": 16}}
+  }}
+]"""
+        raw2 = _call(simple_prompt, model=HAIKU, max_tokens=5000)
+        entries = _parse_json_entries(raw2) or []
+        if not entries:
+            logging.error("[generate_week_meals] both attempts failed, using defaults")
+
+    MEAL_KEYS = ["petit_dejeuner", "dejeuner", "collation", "diner"]
+    MEAL_LABELS = {
+        "petit_dejeuner": ("Petit-déjeuner", "🌅"),
+        "dejeuner":       ("Déjeuner",       "🍽"),
+        "collation":      ("Collation 17h30","🍎"),
+        "diner":          ("Dîner",          "🌙"),
     }
+    DEFAULT_DESCS = {
+        "petit_dejeuner": "Œufs brouillés 3 + pain complet 60g + fromage blanc 100g",
+        "dejeuner":       "Poulet grillé 180g + riz complet 120g + légumes vapeur 150g",
+        "collation":      "Yaourt grec 150g + fruits rouges 100g + amandes 15g",
+        "diner":          "Saumon 180g + patates douces 150g + brocoli 120g",
+    }
+
+    def _parse_meal_entry(entry, day):
+        """Extrait desc + macros par repas depuis l'entrée IA (ancien ou nouveau format)."""
+        result = {}
+        targets = day_targets[day]
+        default_macros = _split_macros(targets)
+        for key in MEAL_KEYS:
+            raw_val = entry.get(key, {})
+            if isinstance(raw_val, dict):
+                desc  = str(raw_val.get("desc", DEFAULT_DESCS[key])).strip()
+                dm    = default_macros[key if key != "petit_dejeuner" else "petit_dej"]
+                kcal  = int(raw_val.get("kcal", dm["kcal"]))
+                p     = int(raw_val.get("p",    dm["p"]))
+                g     = int(raw_val.get("g",    dm["g"]))
+                l     = int(raw_val.get("l",    dm["l"]))
+            else:
+                # Ancien format (string) — fallback macros fixe
+                desc = str(raw_val).strip() or DEFAULT_DESCS[key]
+                mk   = key if key != "petit_dejeuner" else "petit_dej"
+                dm   = default_macros[mk]
+                kcal, p, g, l = dm["kcal"], dm["p"], dm["g"], dm["l"]
+            result[key] = {"desc": _clean_desc(desc), "kcal": kcal, "p": p, "g": g, "l": l}
+        return result
+
+    def _build_text_from_parsed(parsed, targets):
+        """Construit le texte journalier depuis les macros réelles (pas les ratios fixes)."""
+        lines = []
+        total_kcal = total_p = total_g = total_l = 0
+        for key in MEAL_KEYS:
+            m = parsed[key]
+            label, emoji = MEAL_LABELS[key]
+            lines.append(f"{emoji} {label} ({m['kcal']}kcal | {m['p']}g P | {m['g']}g G | {m['l']}g L)")
+            lines.append(m["desc"])
+            lines.append("")
+            total_kcal += m["kcal"]; total_p += m["p"]
+            total_g    += m["g"];    total_l += m["l"]
+        lines.append(f"Total estimé : {total_kcal}kcal | {total_p}g P | {total_g}g G | {total_l}g L")
+        return "\n".join(lines)
+
     entries_by_day = {int(e.get("day", -1)): e for e in entries if e.get("day") is not None}
 
     for day in days_needed:
-        entry = entries_by_day.get(day, {"day": day, **default_desc})
-
-        # Profil principal
+        entry = entries_by_day.get(day, {"day": day})
         is_rest = day in rest_days_set
-        targets = targets_rest if is_rest else targets_train
-        macros = _split_macros(targets)
-        text = _build_meal_text(entry, macros, targets)
+        targets = day_targets[day]
+
+        parsed = _parse_meal_entry(entry, day)
+        text   = _build_text_from_parsed(parsed, targets)
         db.save_daily_plan(week_start, day, text, user_id=user_id)
 
         # Partenaire (mêmes plats, quantités et macros adaptées)
         if partner_profile and partner_user_id:
             p_is_rest = day in p_rest_days_set
             p_targets = p_targets_rest if p_is_rest else p_targets_train
-            p_macros = _split_macros(p_targets)
-            # Scale les quantités en grammes proportionnellement au ratio calorique
             ratio = p_targets['calories'] / targets['calories'] if targets.get('calories') else 1.0
-            scaled_entry = {k: _scale_quantities(v, ratio) if isinstance(v, str) else v
-                           for k, v in entry.items()}
-            p_text = _build_meal_text(scaled_entry, p_macros, p_targets)
+            p_parsed = {}
+            for key in MEAL_KEYS:
+                m = parsed[key]
+                p_parsed[key] = {
+                    "desc": _scale_quantities(m["desc"], ratio),
+                    "kcal": round(m["kcal"] * ratio),
+                    "p":    round(m["p"]    * ratio),
+                    "g":    round(m["g"]    * ratio),
+                    "l":    round(m["l"]    * ratio),
+                }
+            p_text = _build_text_from_parsed(p_parsed, p_targets)
             db.save_daily_plan(week_start, day, p_text, user_id=partner_user_id)
 
 

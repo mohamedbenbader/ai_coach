@@ -67,12 +67,63 @@ def _build_meal_text(descriptions: dict, macros: dict, targets: dict) -> str:
     )
 
 
+def _estimate_macros(description: str) -> dict | None:
+    """Calcule les macros réels d'un plat à partir de sa description ingrédients/quantités."""
+    prompt = f"""Calcule les valeurs nutritionnelles réelles de ce repas :
+{description}
+
+Pour chaque ingrédient, estime ses macros au 100g puis applique la quantité indiquée, puis somme le tout.
+Réponds UNIQUEMENT en JSON :
+{{"calories": 478, "protein_g": 15, "carbs_g": 59, "fat_g": 21}}"""
+    raw = _call(prompt, model=HAIKU, max_tokens=100).strip()
+    try:
+        s, e = raw.find("{"), raw.rfind("}") + 1
+        if s >= 0 and e > s:
+            d = json.loads(raw[s:e])
+            return {
+                "kcal": int(d.get("calories",  0)),
+                "p":    int(d.get("protein_g", 0)),
+                "g":    int(d.get("carbs_g",   0)),
+                "l":    int(d.get("fat_g",     0)),
+            }
+    except Exception:
+        pass
+    return None
+
+
+def _diet_budget_hint(meal_diet: list, meal_budget: str) -> str:
+    """Construit les contraintes régime + budget pour les prompts repas."""
+    diet_labels = {
+        "vegetarien":  "végétarien (pas de viande ni poisson, œufs et produits laitiers OK)",
+        "vegetalien":  "végétalien strict (aucun produit animal)",
+        "sans_porc":   "sans porc ni charcuterie",
+        "sans_gluten": "sans gluten (pas de blé, orge, seigle)",
+        "sans_lactose":"sans lactose (pas de lait, fromage, yaourt classique)",
+        "sans_alcool": "sans alcool dans la cuisine",
+    }
+    budget_labels = {
+        "economique": "budget économique : ingrédients simples et bon marché (œufs, légumineuses, riz, poulet, légumes de saison)",
+        "equilibre":  "budget équilibré : viandes blanches, poisson basique, légumes variés",
+        "premium":    "budget gourmand : saumon, bœuf, fruits de mer, ingrédients premium autorisés",
+    }
+    parts = []
+    if meal_diet:
+        restrictions = ", ".join(diet_labels.get(d, d) for d in meal_diet)
+        parts.append(f"Régime : {restrictions}.")
+    budget_hint = budget_labels.get(meal_budget or "equilibre", budget_labels["equilibre"])
+    parts.append(f"Budget : {budget_hint}.")
+    return " ".join(parts)
+
+
 def generate_daily_meals(targets: dict, day_name: str,
-                         previous_meals: list[str] = None) -> str:
+                         previous_meals: list[str] = None,
+                         meal_diet: list = None, meal_budget: str = None) -> str:
     """Génère le plan repas du jour. L'IA choisit les plats, Python fixe les macros."""
     avoid = f"Évite : {', '.join(previous_meals[:6])}." if previous_meals else ""
+    constraints = _diet_budget_hint(meal_diet or [], meal_budget)
 
     prompt = f"""Propose 4 descriptions de repas pour {day_name}. {avoid}
+{constraints}
 Cuisine variée et moderne : méditerranéen, asiatique, mexicain, libanais, américain healthy, français revisité.
 Noms de plats concrets et appétissants avec ingrédients principaux et quantités en grammes (ex: "Saumon grillé 150g + riz basmati 80g + courgettes sautées 120g").
 
@@ -96,7 +147,8 @@ Réponds UNIQUEMENT en JSON :
 
 
 def regenerate_single_meal(meal_type: str, day_name: str,
-                           remaining: dict, other_meals: str = "") -> str:
+                           remaining: dict, other_meals: str = "",
+                           meal_diet: list = None, meal_budget: str = None) -> str:
     """
     Régénère un seul repas : l'IA génère le plat ET estime ses vrais macros
     en respectant le budget restant de la journée.
@@ -110,36 +162,45 @@ def regenerate_single_meal(meal_type: str, day_name: str,
     }
     label, emoji = meal_labels.get(meal_type, ("Repas", "🍽"))
     avoid = f"\nÉvite de répéter : {other_meals[:200]}" if other_meals else ""
+    constraints = _diet_budget_hint(meal_diet or [], meal_budget)
 
-    prompt = f"""Propose un {label} pour {day_name} qui respecte ce budget calorique : ~{remaining['calories']}kcal, ~{remaining['protein_g']}g protéines, ~{remaining['carbs_g']}g glucides, ~{remaining['fat_g']}g lipides.{avoid}
-Cuisine variée et moderne : méditerranéen, asiatique, mexicain, libanais, américain healthy, français revisité.
-Ingrédients concrets avec quantités en grammes.
+    # ── Étape 1 : générer la description du plat ──
+    desc_prompt = f"""Propose un {label} pour {day_name}.{avoid}
+{constraints}
+Objectif calorique approximatif : ~{remaining['calories']}kcal.
+Cuisine variée : méditerranéen, asiatique, mexicain, libanais, américain healthy, français revisité.
+Réponds avec UNE SEULE ligne : "Nom du plat : ingrédient1 Xg + ingrédient2 Yg + ..."
+Inclus TOUS les ingrédients avec leurs quantités précises en grammes."""
 
+    description = _call(desc_prompt, model=HAIKU, max_tokens=150).strip()
+    # Nettoyer si l'IA a ajouté un préfixe ou des guillemets
+    description = description.strip('"').strip()
+    if description.startswith(emoji):
+        description = description.split("\n", 1)[-1].strip()
+    if not description:
+        description = f"Plat {label.lower()} — ingrédients variés"
+
+    # ── Étape 2 : calculer les macros réels des ingrédients listés ──
+    macro_prompt = f"""Calcule les valeurs nutritionnelles réelles de ce repas :
+{description}
+
+Pour chaque ingrédient, estime ses macros au 100g puis applique la quantité indiquée, puis somme le tout.
 Réponds UNIQUEMENT en JSON :
-{{"description": "Plat avec ingrédients 180g + ...", "calories": 520, "protein_g": 45, "carbs_g": 50, "fat_g": 14}}"""
+{{"calories": 478, "protein_g": 15, "carbs_g": 59, "fat_g": 21}}"""
 
-    raw = _call(prompt, model=HAIKU, max_tokens=350).strip()
-    description = ""
+    macro_raw = _call(macro_prompt, model=HAIKU, max_tokens=100).strip()
     kcal, prot, carbs, fat = (remaining["calories"], remaining["protein_g"],
                                remaining["carbs_g"],  remaining["fat_g"])
     try:
-        s, e = raw.find("{"), raw.rfind("}") + 1
+        s, e = macro_raw.find("{"), macro_raw.rfind("}") + 1
         if s >= 0 and e > s:
-            d = json.loads(raw[s:e])
-            description = str(d.get("description", "")).strip()
+            d = json.loads(macro_raw[s:e])
             kcal  = int(d.get("calories",   remaining["calories"]))
             prot  = int(d.get("protein_g",  remaining["protein_g"]))
             carbs = int(d.get("carbs_g",    remaining["carbs_g"]))
             fat   = int(d.get("fat_g",      remaining["fat_g"]))
     except Exception:
         pass
-    # Fallback propre si la description est vide ou ressemble à du JSON cassé
-    if not description or description.startswith("{"):
-        description = f"Plat {label.lower()} — ingrédients variés"
-
-    # Si le modèle a répété l'entête emoji, on retire cette ligne
-    if description.startswith(emoji):
-        description = description.split("\n", 1)[-1].strip()
 
     return (
         f"{emoji} {label} ({kcal}kcal | {prot}g P | {carbs}g G | {fat}g L)\n{description}"

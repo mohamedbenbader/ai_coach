@@ -710,6 +710,72 @@
         cursor: not-allowed;
       }
 
+      /* Meal check-in */
+      .btn-meal-checkin {
+        padding: 0.18rem 0.45rem;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--muted);
+        transition: all 0.15s;
+        line-height: 1;
+      }
+      .btn-meal-checkin:hover {
+        border-color: #22c55e;
+        color: #22c55e;
+      }
+      .btn-meal-checkin.checked {
+        border-color: #22c55e;
+        background: rgba(34,197,94,.1);
+        color: #22c55e;
+      }
+      .meal-section.meal-done {
+        opacity: 0.6;
+      }
+      .meal-section.meal-done .meal-section-title {
+        text-decoration: line-through;
+        text-decoration-color: var(--muted);
+      }
+      .meal-tracker {
+        margin-top: 0.8rem;
+        padding: 0.6rem 0.8rem;
+        background: var(--surface2);
+        border-radius: 8px;
+      }
+      .meal-tracker-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.72rem;
+        color: var(--muted);
+        margin-bottom: 0.4rem;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+      }
+      .meal-tracker-macros {
+        color: #22c55e;
+        font-weight: 600;
+      }
+      .meal-tracker-bar {
+        height: 5px;
+        background: var(--border);
+        border-radius: 99px;
+        overflow: hidden;
+      }
+      .meal-tracker-fill {
+        height: 100%;
+        background: #22c55e;
+        border-radius: 99px;
+        transition: width 0.3s ease;
+      }
+      .meal-tracker-rest {
+        margin-top: 0.4rem;
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
+
       /* ─── PROFILE FORM ─── */
       .form-grid {
         display: grid;
@@ -2647,6 +2713,31 @@
                 ></div>
               </div>
             </div>
+            <!-- Préférences repas -->
+            <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border)">
+              <div style="font-weight:600;font-size:.9rem;margin-bottom:.7rem">🍽️ Préférences repas</div>
+              <div class="form-group full">
+                <label style="font-size:.82rem;color:var(--muted)">Régime alimentaire <span style="font-weight:400">(plusieurs choix possibles)</span></label>
+                <input type="hidden" id="meal_diet_input" value="[]" />
+                <div class="activity-opts" id="profile-diet-opts" style="flex-wrap:wrap;gap:.4rem;margin-top:.4rem">
+                  <div class="activity-opt" data-diet="sans_porc"    onclick="toggleMealDiet('sans_porc',this)">🚫🐷 Sans porc</div>
+                  <div class="activity-opt" data-diet="vegetarien"   onclick="toggleMealDiet('vegetarien',this)">🥗 Végétarien</div>
+                  <div class="activity-opt" data-diet="vegetalien"   onclick="toggleMealDiet('vegetalien',this)">🌱 Végétalien</div>
+                  <div class="activity-opt" data-diet="sans_gluten"  onclick="toggleMealDiet('sans_gluten',this)">🌾 Sans gluten</div>
+                  <div class="activity-opt" data-diet="sans_lactose" onclick="toggleMealDiet('sans_lactose',this)">🥛 Sans lactose</div>
+                </div>
+              </div>
+              <div class="form-group full" style="margin-top:.7rem">
+                <label style="font-size:.82rem;color:var(--muted)">Niveau de budget</label>
+                <input type="hidden" id="meal_budget_input" value="equilibre" />
+                <div class="activity-opts" id="profile-budget-opts" style="margin-top:.4rem">
+                  <div class="activity-opt" data-budget="economique" onclick="selectMealBudget('economique',this)">€ Économique</div>
+                  <div class="activity-opt active" data-budget="equilibre" onclick="selectMealBudget('equilibre',this)">€€ Équilibré</div>
+                  <div class="activity-opt" data-budget="premium"    onclick="selectMealBudget('premium',this)">€€€ Gourmand</div>
+                </div>
+              </div>
+            </div>
+
             <div class="btn-row">
               <button type="submit" class="btn-primary" id="profile-submit-btn">
                 💾 Enregistrer
@@ -3226,8 +3317,45 @@
           </div>
         </div>
 
-        <!-- Étape 11 : Mode couple -->
+        <!-- Étape 11 : Préférences repas -->
         <div class="ob-step" id="ob-step-11">
+          <div class="ob-emoji-big">🍽️</div>
+          <div class="ob-title">Tes préférences repas</div>
+          <div class="ob-subtitle">Pour des plats adaptés à tes goûts et ton budget</div>
+
+          <div style="font-size:.78rem;color:var(--muted);margin:.3rem 0 .2rem">Régime alimentaire <span style="font-size:.72rem">(plusieurs choix possibles)</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:.5rem" id="ob-diet-choices">
+            <div class="ob-choice" id="ob-diet-sans_porc"    onclick="obToggleDiet('sans_porc',this)">🚫🐷 Sans porc</div>
+            <div class="ob-choice" id="ob-diet-vegetarien"   onclick="obToggleDiet('vegetarien',this)">🥗 Végétarien</div>
+            <div class="ob-choice" id="ob-diet-vegetalien"   onclick="obToggleDiet('vegetalien',this)">🌱 Végétalien</div>
+            <div class="ob-choice" id="ob-diet-sans_gluten"  onclick="obToggleDiet('sans_gluten',this)">🌾 Sans gluten</div>
+            <div class="ob-choice" id="ob-diet-sans_lactose" onclick="obToggleDiet('sans_lactose',this)">🥛 Sans lactose</div>
+          </div>
+
+          <div style="font-size:.78rem;color:var(--muted);margin:.8rem 0 .2rem">Niveau de budget</div>
+          <div class="ob-choices" style="flex-direction:column;gap:.5rem">
+            <div class="ob-choice" onclick="obSelectBudget('economique',this)" id="ob-budget-economique">
+              <span class="ob-choice-icon">€</span>
+              <div><strong>Économique</strong><div style="font-size:.78rem;color:var(--muted)">Œufs, légumineuses, riz, poulet — simple et peu cher</div></div>
+            </div>
+            <div class="ob-choice selected" onclick="obSelectBudget('equilibre',this)" id="ob-budget-equilibre">
+              <span class="ob-choice-icon">€€</span>
+              <div><strong>Équilibré</strong><div style="font-size:.78rem;color:var(--muted)">Viandes blanches, poisson, légumes variés</div></div>
+            </div>
+            <div class="ob-choice" onclick="obSelectBudget('premium',this)" id="ob-budget-premium">
+              <span class="ob-choice-icon">€€€</span>
+              <div><strong>Gourmand</strong><div style="font-size:.78rem;color:var(--muted)">Saumon, bœuf, fruits de mer, ingrédients premium</div></div>
+            </div>
+          </div>
+
+          <div class="ob-nav">
+            <button class="ob-btn-back" onclick="obBack(11)">←</button>
+            <button class="ob-btn-next" onclick="obNext(11)">Continuer →</button>
+          </div>
+        </div>
+
+        <!-- Étape 12 : Mode couple -->
+        <div class="ob-step" id="ob-step-12">
           <div class="ob-emoji-big">💑</div>
           <div class="ob-title">Et si vous étiez deux ?</div>
           <div class="ob-subtitle">Crée un programme personnalisé pour toi et ton/ta partenaire. Mêmes repas, quantités adaptées à chacun.</div>
@@ -3353,13 +3481,13 @@
           </div>
 
           <div class="ob-nav">
-            <button class="ob-btn-back" onclick="obBack(11)">←</button>
+            <button class="ob-btn-back" onclick="obBack(12)">←</button>
             <button class="ob-btn-next" onclick="obNextCouple()">Générer mon plan 🚀</button>
           </div>
         </div>
 
         <!-- Étape 12 : Génération -->
-        <div class="ob-step" id="ob-step-12">
+        <div class="ob-step" id="ob-step-13">
           <div class="ob-generating">
             <div class="ob-spinner"></div>
             <div class="ob-title" style="margin: 0">Génération en cours...</div>
@@ -4390,11 +4518,23 @@
         { key: "diner", emoji: "🌙", label: "Dîner" },
       ];
 
-      function showDayDetail(day) {
+      let _currentCheckins = new Set();
+
+      async function showDayDetail(day) {
         _currentDayDetailData = day;
         currentDayDate = day.date_str || null;
         const detail = document.getElementById("day-detail");
         detail.classList.add("visible");
+
+        // Charger les check-ins du jour
+        _currentCheckins = new Set();
+        if (currentDayDate) {
+          try {
+            const cr = await fetch(`/api/meal_checkins?date=${currentDayDate}`);
+            const cd = await cr.json();
+            _currentCheckins = new Set(cd.checked || []);
+          } catch {}
+        }
 
         // Sécurité : certains noms générés par l'IA contiennent "REPOS — ..."
         const isRest =
@@ -4443,7 +4583,7 @@
         }
 
         const mealsHtml = day.meals
-          ? buildMealSections(day.meals, !!currentDayDate)
+          ? buildMealSections(day.meals, !!currentDayDate, _currentCheckins)
           : `<div class="meal-placeholder">Repas non planifiés.<br>Utilise le bouton "Planifier mes repas" dans la section Courses.</div>`;
 
         const regenBar = currentDayDate
@@ -4475,7 +4615,7 @@
         detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }
 
-      function buildMealSections(text, showBtns) {
+      function buildMealSections(text, showBtns, checkins = new Set()) {
         const clean = text.replace(/Total estimé[^\n]*/gi, "").trim();
 
         const emojiList = MEAL_SECTIONS.map((s) => s.emoji);
@@ -4499,13 +4639,21 @@
           .map((b) => {
             const macros = parseMacros(b.content);
             const body = b.content.trim().split("\n").slice(1).join("\n").trim();
-            const btn = showBtns
+            const isChecked = checkins.has(b.key);
+            const checkinBtn = showBtns
+              ? `<button class="btn-meal-checkin${isChecked ? ' checked' : ''}" id="checkin-${b.key}"
+                  onclick="toggleMealCheckin('${b.key}')" title="${isChecked ? 'Marquer comme non pris' : 'Marquer comme pris'}">
+                  ${isChecked ? '✅' : '○'}
+                </button>`
+              : "";
+            const regenBtns = showBtns
               ? `<button class="btn-regen-meal" onclick="regenMeal('${b.key}')" title="Régénérer">↺</button>
                  <button class="btn-recipe" onclick='openRecipeModal(${JSON.stringify(body)}, ${JSON.stringify(b.emoji + " " + b.label)})' title="Voir la recette">📖</button>`
               : "";
-            return `<div class="meal-section" id="section-${b.key}">
+            return `<div class="meal-section${isChecked ? ' meal-done' : ''}" id="section-${b.key}">
           <div class="meal-section-header">
-            <span class="meal-section-title">${b.emoji} ${b.label}</span>${btn}
+            <span class="meal-section-title">${b.emoji} ${b.label}</span>
+            <span style="display:flex;align-items:center;gap:.3rem">${checkinBtn}${regenBtns}</span>
           </div>
           ${macros ? macroBadges(macros) : ""}
           <div class="meal-section-body" style="margin-top:.35rem;">${escapeHtml(body)}</div>
@@ -4514,19 +4662,21 @@
           .join("");
 
         // Recalcule le total depuis les macros de chaque bloc (ignore la ligne stockée en DB)
-        let sumKcal = 0,
-          sumProt = 0,
-          sumCarb = 0,
-          sumFat = 0;
+        let sumKcal = 0, sumProt = 0, sumCarb = 0, sumFat = 0;
+        let doneKcal = 0, doneProt = 0, doneCarb = 0, doneFat = 0;
         blocks.forEach((b) => {
           const m = parseMacros(b.content);
           if (m && m.kcal !== "—") {
-            sumKcal += parseInt(m.kcal) || 0;
-            sumProt += parseInt(m.prot) || 0;
-            sumCarb += parseInt(m.carb) || 0;
-            sumFat += parseInt(m.fat) || 0;
+            const kcal = parseInt(m.kcal) || 0, prot = parseInt(m.prot) || 0;
+            const carb = parseInt(m.carb) || 0, fat = parseInt(m.fat) || 0;
+            sumKcal += kcal; sumProt += prot; sumCarb += carb; sumFat += fat;
+            if (checkins.has(b.key)) {
+              doneKcal += kcal; doneProt += prot; doneCarb += carb; doneFat += fat;
+            }
           }
         });
+
+        const checkedCount = blocks.filter(b => checkins.has(b.key)).length;
         const totalHtml = sumKcal
           ? `<div class="meal-total">
         <div class="meal-total-label">Total journée</div>
@@ -4534,7 +4684,59 @@
       </div>`
           : "";
 
-        return sectionsHtml + totalHtml;
+        const restKcal = sumKcal - doneKcal;
+        const trackerHtml = showBtns && sumKcal ? `<div class="meal-tracker">
+          <div class="meal-tracker-label">
+            <span>Suivi : ${checkedCount}/${blocks.length} repas pris</span>
+            ${checkedCount > 0 ? `<span class="meal-tracker-macros">${doneKcal} kcal consommées</span>` : ''}
+          </div>
+          <div class="meal-tracker-bar">
+            <div class="meal-tracker-fill" style="width:${sumKcal ? Math.round(doneKcal/sumKcal*100) : 0}%"></div>
+          </div>
+          <div class="meal-tracker-rest">
+            ${restKcal > 0
+              ? `Reste <strong>${restKcal} kcal</strong> · ${sumProt - doneProt}g P · ${sumCarb - doneCarb}g G · ${sumFat - doneFat}g L`
+              : `<span style="color:#22c55e;font-weight:600">✓ Objectif atteint</span>`}
+          </div>
+        </div>` : "";
+
+        return sectionsHtml + totalHtml + trackerHtml;
+      }
+
+      async function toggleMealCheckin(mealKey) {
+        if (!currentDayDate) return;
+        const res = await fetch("/api/meal_checkin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date: currentDayDate, meal_type: mealKey }),
+        });
+        const data = await res.json();
+        if (!data.ok) return;
+        if (data.checked) _currentCheckins.add(mealKey);
+        else _currentCheckins.delete(mealKey);
+
+        // Mettre à jour le bouton et la card
+        const btn = document.getElementById(`checkin-${mealKey}`);
+        const section = document.getElementById(`section-${mealKey}`);
+        if (btn) {
+          btn.classList.toggle("checked", data.checked);
+          btn.textContent = data.checked ? "✅" : "○";
+          btn.title = data.checked ? "Marquer comme non pris" : "Marquer comme pris";
+        }
+        if (section) section.classList.toggle("meal-done", data.checked);
+
+        // Recalculer la barre de suivi
+        const block = document.querySelector(".detail-block:last-child");
+        const currentMealsText = _currentDayDetailData?.meals;
+        if (block && currentMealsText) {
+          const tracker = block.querySelector(".meal-tracker");
+          const newHtml = buildMealSections(currentMealsText, true, _currentCheckins);
+          const tmp = document.createElement("div");
+          tmp.innerHTML = newHtml;
+          const newTracker = tmp.querySelector(".meal-tracker");
+          if (tracker && newTracker) tracker.replaceWith(newTracker);
+          else if (!tracker && newTracker) block.appendChild(newTracker);
+        }
       }
 
       async function regenDay() {
@@ -4557,7 +4759,7 @@
           const block = document.querySelector(".detail-block:last-child");
           block.innerHTML =
             `<h4>🍽 Repas</h4>` +
-            buildMealSections(data.meals, true) +
+            buildMealSections(data.meals, true, _currentCheckins) +
             `<div class="regen-bar"><button class="btn-regen primary" onclick="regenDay()">↺ Régénérer tous les repas</button></div>`;
           const idx = weekDays.findIndex((d) => d.date_str === currentDayDate);
           if (idx >= 0) weekDays[idx].meals = data.meals;
@@ -4586,7 +4788,7 @@
           const block = document.querySelector(".detail-block:last-child");
           block.innerHTML =
             `<h4>🍽 Repas</h4>` +
-            buildMealSections(data.meals, true) +
+            buildMealSections(data.meals, true, _currentCheckins) +
             `<div class="regen-bar"><button class="btn-regen primary" onclick="regenDay()">↺ Régénérer tous les repas</button></div>`;
           const idx = weekDays.findIndex((d) => d.date_str === currentDayDate);
           if (idx >= 0) weekDays[idx].meals = data.meals;
@@ -4631,8 +4833,11 @@
               : [];
         setSports(es);
         setRestDays(p.rest_days || []);
-
-
+        // Préférences repas
+        const diet = Array.isArray(p.meal_diet) ? p.meal_diet
+                     : (typeof p.meal_diet === 'string' ? JSON.parse(p.meal_diet || '[]') : []);
+        setMealDiet(diet);
+        setMealBudget(p.meal_budget || 'equilibre');
       }
 
       function setSexe(val) {
@@ -4679,6 +4884,49 @@
         });
         document.getElementById("rest_days_input").value = JSON.stringify(_profileRestDays);
         _updateRestDaysHint();
+      }
+
+      // ── PRÉFÉRENCES REPAS ──
+      function setMealDiet(dietArray) {
+        document.querySelectorAll('#profile-diet-opts [data-diet]').forEach(el => {
+          el.classList.toggle('active', dietArray.includes(el.dataset.diet));
+        });
+        document.getElementById('meal_diet_input').value = JSON.stringify(dietArray);
+      }
+
+      function toggleMealDiet(val, el) {
+        const inp = document.getElementById('meal_diet_input');
+        let current = [];
+        try { current = JSON.parse(inp.value || '[]'); } catch { current = []; }
+        if (el.classList.contains('active')) {
+          current = current.filter(d => d !== val);
+          el.classList.remove('active');
+        } else {
+          // végétarien et végétalien mutuellement exclusifs
+          if (val === 'vegetalien') {
+            current = current.filter(d => d !== 'vegetarien');
+            document.querySelector('[data-diet="vegetarien"]')?.classList.remove('active');
+          } else if (val === 'vegetarien') {
+            current = current.filter(d => d !== 'vegetalien');
+            document.querySelector('[data-diet="vegetalien"]')?.classList.remove('active');
+          }
+          current.push(val);
+          el.classList.add('active');
+        }
+        inp.value = JSON.stringify(current);
+      }
+
+      function setMealBudget(val) {
+        document.querySelectorAll('#profile-budget-opts [data-budget]').forEach(el => {
+          el.classList.toggle('active', el.dataset.budget === val);
+        });
+        document.getElementById('meal_budget_input').value = val;
+      }
+
+      function selectMealBudget(val, el) {
+        document.querySelectorAll('#profile-budget-opts [data-budget]').forEach(e => e.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('meal_budget_input').value = val;
       }
 
       function toggleProfileRestDay(dow, el) {
@@ -4936,6 +5184,8 @@
             extra_sports: _profileExtraSports,
             rest_days: _profileRestDays,
             training_days: "0,1,2,3,5,6",
+            meal_diet: JSON.parse(document.getElementById('meal_diet_input')?.value || '[]'),
+            meal_budget: document.getElementById('meal_budget_input')?.value || 'equilibre',
           };
 
           // Détecter les champs qui impactent les calculs
@@ -5817,17 +6067,46 @@
           // Initialiser les choix de jour avant d'afficher l'étape 10
           obInitStartDay();
         }
-        if (fromStep < 11) {
+        if (fromStep < 12) {
           obShowStep(fromStep + 1);
           return;
         }
-        // fromStep === 11 → lancer la génération (reached via obNextCouple)
-        obShowStep(12);
+        // fromStep === 12 → lancer la génération (reached via obNextCouple)
+        obShowStep(13);
         obGenerate();
       }
 
       function obBack(fromStep) {
         if (fromStep > 1) obShowStep(fromStep - 1);
+      }
+
+      // ── Préférences repas (step 11) ──
+      let _obDietSelected = [];
+      let _obBudgetSelected = 'equilibre';
+
+      function obToggleDiet(val, el) {
+        const idx = _obDietSelected.indexOf(val);
+        if (idx >= 0) {
+          _obDietSelected.splice(idx, 1);
+          el.classList.remove('selected');
+        } else {
+          // végétarien et végétalien sont mutuellement exclusifs
+          if (val === 'vegetalien') {
+            _obDietSelected = _obDietSelected.filter(d => d !== 'vegetarien');
+            document.getElementById('ob-diet-vegetarien')?.classList.remove('selected');
+          } else if (val === 'vegetarien') {
+            _obDietSelected = _obDietSelected.filter(d => d !== 'vegetalien');
+            document.getElementById('ob-diet-vegetalien')?.classList.remove('selected');
+          }
+          _obDietSelected.push(val);
+          el.classList.add('selected');
+        }
+      }
+
+      function obSelectBudget(val, el) {
+        _obBudgetSelected = val;
+        document.querySelectorAll('#ob-step-11 .ob-choice[id^="ob-budget-"]').forEach(e => e.classList.remove('selected'));
+        el.classList.add('selected');
       }
 
       const obPData = { sexe: 'femme', goal: 'recomposition', job_type: 'bureau', fitness_level: '', gym_sessions_per_week: 3, rest_days: [] };
@@ -5942,7 +6221,7 @@
           }
           if (!obPData.goal) { showToast('❌ Choisis un objectif pour le partenaire', true); return; }
         }
-        obNext(11);
+        obNext(12);
       }
 
       function obGenStep(n) {
@@ -5985,6 +6264,8 @@
           fitness_level: obData.fitness_level || "intermediaire",
           rest_days: obData.rest_days || [],
           training_days: "0,1,2,3,5,6",
+          meal_diet:   _obDietSelected,
+          meal_budget: _obBudgetSelected || 'equilibre',
         };
         try {
           const r1 = await fetch("/api/profile", {
@@ -6057,7 +6338,7 @@
           openMealWizard();
         } catch (e) {
           showToast("❌ Erreur lors de la génération, réessaie.", true);
-          obShowStep(11); // Retour à l'étape couple pour réessayer
+          obShowStep(12); // Retour à l'étape couple pour réessayer
         }
       }
 
