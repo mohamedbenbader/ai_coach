@@ -47,6 +47,8 @@ def init_db():
             rest_days TEXT DEFAULT '[]',
             program_start_date TEXT,
             total_phases INTEGER DEFAULT 1,
+            macros_training TEXT DEFAULT '{}',
+            macros_rest TEXT DEFAULT '{}',
             created_at DATE DEFAULT CURRENT_DATE,
             UNIQUE(user_id)
         )
@@ -128,8 +130,88 @@ def init_db():
         )
     """)
 
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS exercise_overrides (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            date TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            new_name TEXT NOT NULL,
+            new_sets TEXT,
+            new_rest TEXT,
+            UNIQUE(user_id, date, original_name)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS session_done (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            date TEXT NOT NULL,
+            UNIQUE(user_id, date)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS weekly_reports (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            week_start TEXT NOT NULL,
+            report_text TEXT,
+            UNIQUE(user_id, week_start)
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS exercise_logs (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            date TEXT NOT NULL,
+            exercise_name TEXT NOT NULL,
+            sets_done INTEGER,
+            reps TEXT,
+            weight_kg REAL
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS couples (
+            id SERIAL PRIMARY KEY,
+            user_id_1 INTEGER NOT NULL,
+            user_id_2 INTEGER NOT NULL,
+            created_at DATE DEFAULT CURRENT_DATE,
+            UNIQUE(user_id_1, user_id_2)
+        )
+    """)
+
     conn.commit()
     conn.close()
+
+
+# ── Mode Couple ───────────────────────────────────────────────────────────────
+
+def create_couple(user_id_1: int, user_id_2: int):
+    conn = get_conn()
+    c = _cur(conn)
+    uid1, uid2 = min(user_id_1, user_id_2), max(user_id_1, user_id_2)
+    c.execute("""
+        INSERT INTO couples (user_id_1, user_id_2) VALUES (%s, %s)
+        ON CONFLICT (user_id_1, user_id_2) DO NOTHING
+    """, (uid1, uid2))
+    conn.commit()
+    conn.close()
+
+
+def get_partner_user_id(user_id: int) -> int | None:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("""
+        SELECT CASE WHEN user_id_1 = %s THEN user_id_2 ELSE user_id_1 END AS partner_id
+        FROM couples WHERE user_id_1 = %s OR user_id_2 = %s
+    """, (user_id, user_id, user_id))
+    row = c.fetchone()
+    conn.close()
+    return int(row["partner_id"]) if row else None
 
 
 # ── Utilisateurs ──────────────────────────────────────────────────────────────
@@ -168,6 +250,7 @@ def get_user_by_id(user_id: int) -> dict | None:
 # ── Profil ────────────────────────────────────────────────────────────────────
 
 def save_profile(data: dict, user_id: int = 1):
+    from profile import get_daily_targets
     conn = get_conn()
     c = _cur(conn)
     es = data.get("extra_sports", [])
@@ -176,13 +259,21 @@ def save_profile(data: dict, user_id: int = 1):
     rest = data.get("rest_days", [])
     if not isinstance(rest, str):
         rest = json.dumps(rest)
+
+    # Calcul des besoins nutritionnels — fait une seule fois ici, stocké en DB
+    profile_for_calc = {**data, "extra_sports": json.loads(es) if isinstance(es, str) else es,
+                        "rest_days": json.loads(rest) if isinstance(rest, str) else rest}
+    macros_training = json.dumps(get_daily_targets(profile_for_calc, is_rest_day=False))
+    macros_rest     = json.dumps(get_daily_targets(profile_for_calc, is_rest_day=True))
+
     c.execute("""
         INSERT INTO profile (user_id, name, age, weight_kg, height_cm, goal_weight_kg,
             activity_level, training_days, goal, sexe, job_type, gym_sessions_per_week,
-            extra_sport, extra_sports, fitness_level, rest_days)
+            extra_sport, extra_sports, fitness_level, rest_days, macros_training, macros_rest)
         VALUES (%(user_id)s, %(name)s, %(age)s, %(weight_kg)s, %(height_cm)s, %(goal_weight_kg)s,
             %(activity_level)s, %(training_days)s, %(goal)s, %(sexe)s, %(job_type)s,
-            %(gym_sessions_per_week)s, %(extra_sport)s, %(extra_sports)s, %(fitness_level)s, %(rest_days)s)
+            %(gym_sessions_per_week)s, %(extra_sport)s, %(extra_sports)s, %(fitness_level)s,
+            %(rest_days)s, %(macros_training)s, %(macros_rest)s)
         ON CONFLICT (user_id) DO UPDATE SET
             name = EXCLUDED.name,
             age = EXCLUDED.age,
@@ -198,7 +289,9 @@ def save_profile(data: dict, user_id: int = 1):
             extra_sport = EXCLUDED.extra_sport,
             extra_sports = EXCLUDED.extra_sports,
             fitness_level = EXCLUDED.fitness_level,
-            rest_days = EXCLUDED.rest_days
+            rest_days = EXCLUDED.rest_days,
+            macros_training = EXCLUDED.macros_training,
+            macros_rest = EXCLUDED.macros_rest
     """, {
         **data,
         "user_id": user_id,
@@ -212,6 +305,8 @@ def save_profile(data: dict, user_id: int = 1):
         "extra_sports": es,
         "fitness_level": data.get("fitness_level", "intermediaire"),
         "rest_days": rest,
+        "macros_training": macros_training,
+        "macros_rest": macros_rest,
     })
     conn.commit()
     conn.close()
@@ -501,3 +596,142 @@ def get_weekly_shopping(week_start: str, user_id: int = 1) -> str | None:
     row = c.fetchone()
     conn.close()
     return row["shopping_text"] if row else None
+
+
+# ── Overrides d'exercices ────────────────────────────────────────────────────
+
+def save_exercise_override(log_date: str, original_name: str, new_name: str,
+                           new_sets: str = None, new_rest: str = None, user_id: int = 1):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("""
+        INSERT INTO exercise_overrides (user_id, date, original_name, new_name, new_sets, new_rest)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, date, original_name) DO UPDATE SET
+            new_name = EXCLUDED.new_name,
+            new_sets = EXCLUDED.new_sets,
+            new_rest = EXCLUDED.new_rest
+    """, (user_id, log_date, original_name, new_name, new_sets, new_rest))
+    conn.commit()
+    conn.close()
+
+
+def get_exercise_overrides(log_date: str, user_id: int = 1) -> dict:
+    """Retourne {original_name: {new_name, new_sets, new_rest}} pour une date."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(
+        "SELECT * FROM exercise_overrides WHERE user_id = %s AND date = %s",
+        (user_id, log_date)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return {r["original_name"]: dict(r) for r in rows}
+
+
+# ── Séance faite ─────────────────────────────────────────────────────────────
+
+def toggle_session_done(log_date: str, user_id: int = 1) -> bool:
+    """Toggle session done. Retourne True si maintenant done, False si retiré."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("SELECT id FROM session_done WHERE user_id = %s AND date = %s", (user_id, log_date))
+    existing = c.fetchone()
+    if existing:
+        c.execute("DELETE FROM session_done WHERE user_id = %s AND date = %s", (user_id, log_date))
+        done = False
+    else:
+        c.execute("INSERT INTO session_done (user_id, date) VALUES (%s, %s)", (user_id, log_date))
+        done = True
+    conn.commit()
+    conn.close()
+    return done
+
+
+def get_done_dates(week_start: str, user_id: int = 1) -> set:
+    """Retourne l'ensemble des dates où une séance a été marquée 'faite' pour la semaine."""
+    conn = get_conn()
+    c = _cur(conn)
+    week_end = str(date.fromisoformat(week_start) + timedelta(days=6))
+    c.execute(
+        "SELECT date FROM session_done WHERE user_id = %s AND date >= %s AND date <= %s",
+        (user_id, week_start, week_end)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return {r["date"] for r in rows}
+
+
+# ── Bilan hebdomadaire ────────────────────────────────────────────────────────
+
+def save_weekly_report(week_start: str, report_text: str, user_id: int = 1):
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("""
+        INSERT INTO weekly_reports (user_id, week_start, report_text)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (user_id, week_start) DO UPDATE SET report_text = EXCLUDED.report_text
+    """, (user_id, week_start, report_text))
+    conn.commit()
+    conn.close()
+
+
+def get_weekly_report(week_start: str, user_id: int = 1) -> str | None:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(
+        "SELECT report_text FROM weekly_reports WHERE user_id = %s AND week_start = %s",
+        (user_id, week_start)
+    )
+    row = c.fetchone()
+    conn.close()
+    return row["report_text"] if row else None
+
+
+# ── Logs de séance (exercices réels) ─────────────────────────────────────────
+
+def save_exercise_logs(log_date: str, exercises: list[dict], user_id: int = 1):
+    """Remplace les logs du jour par les nouvelles entrées."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("DELETE FROM exercise_logs WHERE user_id = %s AND date = %s", (user_id, log_date))
+    for ex in exercises:
+        c.execute("""
+            INSERT INTO exercise_logs (user_id, date, exercise_name, sets_done, reps, weight_kg)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id, log_date, ex["exercise_name"],
+              ex.get("sets_done"), ex.get("reps"), ex.get("weight_kg")))
+    conn.commit()
+    conn.close()
+
+
+def get_exercise_logs(log_date: str, user_id: int = 1) -> list[dict]:
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(
+        "SELECT * FROM exercise_logs WHERE user_id = %s AND date = %s ORDER BY id",
+        (user_id, log_date)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_phase_exercise_summary(phase_start: str, phase_end: str, user_id: int = 1) -> list[dict]:
+    """Aggrège les perfs par exercice sur une plage de dates (une phase = ~4 semaines)."""
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute("""
+        SELECT exercise_name,
+               ROUND(AVG(weight_kg)::numeric, 1) as avg_weight,
+               ROUND(AVG(sets_done)::numeric, 0) as avg_sets,
+               COUNT(*) as sessions
+        FROM exercise_logs
+        WHERE user_id = %s AND date >= %s AND date < %s AND weight_kg > 0
+        GROUP BY exercise_name
+        ORDER BY sessions DESC
+        LIMIT 20
+    """, (user_id, phase_start, phase_end))
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
