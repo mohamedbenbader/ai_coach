@@ -91,8 +91,8 @@ Réponds UNIQUEMENT en JSON :
     return None
 
 
-def _diet_budget_hint(meal_diet: list, meal_budget: str) -> str:
-    """Construit les contraintes régime + budget pour les prompts repas."""
+def _diet_budget_hint(meal_diet: list, meal_budget: str, meal_style: str = None) -> str:
+    """Construit les contraintes régime + budget + style pour les prompts repas."""
     diet_labels = {
         "vegetarien":  "végétarien (pas de viande ni poisson, œufs et produits laitiers OK)",
         "vegetalien":  "végétalien strict (aucun produit animal)",
@@ -106,21 +106,30 @@ def _diet_budget_hint(meal_diet: list, meal_budget: str) -> str:
         "equilibre":  "budget équilibré : viandes blanches, poisson basique, légumes variés",
         "premium":    "budget gourmand : saumon, bœuf, fruits de mer, ingrédients premium autorisés",
     }
+    style_labels = {
+        "basique":       "Style BASIQUE : plats simples avec peu d'ingrédients (riz/poulet, pâtes/thon, œufs/légumes). Préparation rapide, recettes sans prise de tête.",
+        "simple_varie":  "Style SIMPLE & VARIÉ : plats faciles à cuisiner mais avec de la diversité. Quelques cuisines différentes (méditerranéen, asiatique simple, français classique), ingrédients accessibles.",
+        "gourmet":       "Style CRÉATIF & GOURMAND : recettes élaborées et savoureuses. Cuisines du monde variées, associations d'ingrédients originales, saveurs prononcées.",
+        "aleatoire":     "Style LIBRE : aucune contrainte de style, mélange de tout.",
+    }
     parts = []
     if meal_diet:
         restrictions = ", ".join(diet_labels.get(d, d) for d in meal_diet)
         parts.append(f"Régime : {restrictions}.")
     budget_hint = budget_labels.get(meal_budget or "equilibre", budget_labels["equilibre"])
     parts.append(f"Budget : {budget_hint}.")
+    style_hint = style_labels.get(meal_style or "aleatoire", style_labels["aleatoire"])
+    parts.append(style_hint)
     return " ".join(parts)
 
 
 def generate_daily_meals(targets: dict, day_name: str,
                          previous_meals: list[str] = None,
-                         meal_diet: list = None, meal_budget: str = None) -> str:
+                         meal_diet: list = None, meal_budget: str = None,
+                         meal_style: str = None) -> str:
     """Génère le plan repas du jour. L'IA choisit les plats, Python fixe les macros."""
     avoid = f"Évite : {', '.join(previous_meals[:6])}." if previous_meals else ""
-    constraints = _diet_budget_hint(meal_diet or [], meal_budget)
+    constraints = _diet_budget_hint(meal_diet or [], meal_budget, meal_style)
 
     prompt = f"""Propose 4 descriptions de repas pour {day_name}. {avoid}
 {constraints}
@@ -148,7 +157,10 @@ Réponds UNIQUEMENT en JSON :
 
 def regenerate_single_meal(meal_type: str, day_name: str,
                            remaining: dict, other_meals: str = "",
-                           meal_diet: list = None, meal_budget: str = None) -> str:
+                           meal_diet: list = None, meal_budget: str = None,
+                           current_meal: str = "",
+                           history: list = None,
+                           meal_style: str = None) -> str:
     """
     Régénère un seul repas : l'IA génère le plat ET estime ses vrais macros
     en respectant le budget restant de la journée.
@@ -161,8 +173,27 @@ def regenerate_single_meal(meal_type: str, day_name: str,
         "diner":          ("Dîner",           "🌙"),
     }
     label, emoji = meal_labels.get(meal_type, ("Repas", "🍽"))
-    avoid = f"\nÉvite de répéter : {other_meals[:200]}" if other_meals else ""
-    constraints = _diet_budget_hint(meal_diet or [], meal_budget)
+    import re as _re
+    avoid_parts = []
+    # Construire la liste complète des repas à éviter (courant + historique)
+    all_excluded = []
+    if current_meal:
+        all_excluded.append(current_meal)
+    if history:
+        all_excluded.extend(history)
+    if all_excluded:
+        names = []
+        for meal in all_excluded:
+            m = _re.match(r'^([^:(]+)', meal.strip())
+            names.append(f'"{m.group(1).strip()}"' if m else f'"{meal[:60]}"')
+        avoid_parts.append(
+            f"INTERDIT — ne propose AUCUN de ces plats ni aucune variation : {', '.join(names)}. "
+            f"Tu dois proposer un plat avec une BASE TOTALEMENT DIFFÉRENTE."
+        )
+    if other_meals:
+        avoid_parts.append(f"Évite aussi de répéter les plats du jour : {other_meals[:300]}")
+    avoid = ("\n" + "\n".join(avoid_parts)) if avoid_parts else ""
+    constraints = _diet_budget_hint(meal_diet or [], meal_budget, meal_style)
 
     # ── Étape 1 : générer la description du plat ──
     desc_prompt = f"""Propose un {label} pour {day_name}.{avoid}

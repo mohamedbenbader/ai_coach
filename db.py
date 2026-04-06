@@ -51,6 +51,7 @@ def init_db():
             macros_rest TEXT DEFAULT '{}',
             meal_diet TEXT DEFAULT '[]',
             meal_budget TEXT DEFAULT 'equilibre',
+            meal_style TEXT DEFAULT 'aleatoire',
             created_at DATE DEFAULT CURRENT_DATE,
             UNIQUE(user_id)
         )
@@ -60,6 +61,7 @@ def init_db():
     for col, definition in [
         ("meal_diet",   "TEXT DEFAULT '[]'"),
         ("meal_budget", "TEXT DEFAULT 'equilibre'"),
+        ("meal_style",  "TEXT DEFAULT 'aleatoire'"),
     ]:
         try:
             c.execute(f"ALTER TABLE profile ADD COLUMN {col} {definition}")
@@ -293,11 +295,12 @@ def save_profile(data: dict, user_id: int = 1):
         INSERT INTO profile (user_id, name, age, weight_kg, height_cm, goal_weight_kg,
             activity_level, training_days, goal, sexe, job_type, gym_sessions_per_week,
             extra_sport, extra_sports, fitness_level, rest_days, macros_training, macros_rest,
-            meal_diet, meal_budget)
+            meal_diet, meal_budget, meal_style)
         VALUES (%(user_id)s, %(name)s, %(age)s, %(weight_kg)s, %(height_cm)s, %(goal_weight_kg)s,
             %(activity_level)s, %(training_days)s, %(goal)s, %(sexe)s, %(job_type)s,
             %(gym_sessions_per_week)s, %(extra_sport)s, %(extra_sports)s, %(fitness_level)s,
-            %(rest_days)s, %(macros_training)s, %(macros_rest)s, %(meal_diet)s, %(meal_budget)s)
+            %(rest_days)s, %(macros_training)s, %(macros_rest)s, %(meal_diet)s, %(meal_budget)s,
+            %(meal_style)s)
         ON CONFLICT (user_id) DO UPDATE SET
             name = EXCLUDED.name,
             age = EXCLUDED.age,
@@ -317,7 +320,8 @@ def save_profile(data: dict, user_id: int = 1):
             macros_training = EXCLUDED.macros_training,
             macros_rest = EXCLUDED.macros_rest,
             meal_diet = EXCLUDED.meal_diet,
-            meal_budget = EXCLUDED.meal_budget
+            meal_budget = EXCLUDED.meal_budget,
+            meal_style = EXCLUDED.meal_style
     """, {
         **data,
         "user_id": user_id,
@@ -335,6 +339,7 @@ def save_profile(data: dict, user_id: int = 1):
         "macros_rest": macros_rest,
         "meal_diet":   json.dumps(data.get("meal_diet", [])),
         "meal_budget": data.get("meal_budget", "equilibre"),
+        "meal_style":  data.get("meal_style", "aleatoire"),
     })
     conn.commit()
     conn.close()
@@ -350,6 +355,18 @@ def get_profile(user_id: int = 1) -> dict | None:
 
 
 # ── Poids ─────────────────────────────────────────────────────────────────────
+
+def update_macros(macros_training: dict, macros_rest: dict, user_id: int = 1):
+    import json as _json
+    conn = get_conn()
+    c = _cur(conn)
+    c.execute(
+        "UPDATE profile SET macros_training = %s, macros_rest = %s WHERE user_id = %s",
+        (_json.dumps(macros_training), _json.dumps(macros_rest), user_id)
+    )
+    conn.commit()
+    conn.close()
+
 
 def log_weight(weight_kg: float, user_id: int = 1):
     conn = get_conn()

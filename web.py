@@ -368,6 +368,7 @@ def save_profile_route():
 
         valid_diets  = ("vegetarien", "vegetalien", "sans_porc", "sans_gluten", "sans_lactose", "sans_alcool")
         valid_budgets = ("economique", "equilibre", "premium")
+        valid_styles  = ("basique", "simple_varie", "gourmet", "aleatoire")
 
         raw_diet = data.get("meal_diet", [])
         if isinstance(raw_diet, str):
@@ -393,6 +394,7 @@ def save_profile_route():
             "rest_days":             validated_rest,
             "meal_diet":             validated_diet,
             "meal_budget":           data.get("meal_budget", "equilibre") if data.get("meal_budget") in valid_budgets else "equilibre",
+            "meal_style":            data.get("meal_style", "aleatoire") if data.get("meal_style") in valid_styles else "aleatoire",
         }
         db.save_profile(payload, user_id=uid)
         db.log_weight(payload["weight_kg"], user_id=uid)
@@ -835,6 +837,71 @@ def substitute_exercise():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/needs_weight_log")
+def needs_weight_log():
+    uid = current_user_id()
+    p = db.get_profile(user_id=uid)
+    if not p or not p.get("program_start_date"):
+        return jsonify({"needs_log": False})
+
+    start = p["program_start_date"]
+    if hasattr(start, "isoformat"):
+        start_date = start
+    else:
+        start_date = date.fromisoformat(str(start))
+
+    # Pas encore une semaine depuis le début du programme
+    if (date.today() - start_date).days < 7:
+        return jsonify({"needs_log": False})
+
+    logs = db.get_weight_logs(limit=1, user_id=uid)
+    if logs:
+        last_log_date = logs[0]["logged_at"]
+        if hasattr(last_log_date, "toordinal"):
+            last_date = last_log_date
+        else:
+            last_date = date.fromisoformat(str(last_log_date))
+        if (date.today() - last_date).days <= 8:
+            return jsonify({"needs_log": False})
+
+    return jsonify({
+        "needs_log": True,
+        "message": "Enregistre ton poids de fin de semaine pour débloquer la semaine suivante et ajuster tes macros."
+    })
+
+
+@app.route("/api/macro_adjustment")
+def get_macro_adjustment():
+    from profile import suggest_macro_adjustment
+    uid = current_user_id()
+    p = db.get_profile(user_id=uid)
+    if not p:
+        return jsonify({"ok": False, "error": "profil manquant"}), 400
+    weight_logs = db.get_weight_logs(limit=60, user_id=uid)
+    suggestion = suggest_macro_adjustment(p, weight_logs)
+    return jsonify({"ok": True, **suggestion})
+
+
+@app.route("/api/macro_adjustment/apply", methods=["POST"])
+def apply_macro_adjustment():
+    from profile import suggest_macro_adjustment
+    uid = current_user_id()
+    p = db.get_profile(user_id=uid)
+    if not p:
+        return jsonify({"ok": False, "error": "profil manquant"}), 400
+    weight_logs = db.get_weight_logs(limit=60, user_id=uid)
+    suggestion = suggest_macro_adjustment(p, weight_logs)
+    if not suggestion.get("should_adjust"):
+        return jsonify({"ok": False, "error": "Aucun ajustement nécessaire"})
+    db.update_macros(suggestion["new_macros_training"], suggestion["new_macros_rest"], user_id=uid)
+    return jsonify({
+        "ok": True,
+        "delta_kcal": suggestion["delta_kcal"],
+        "new_macros_training": suggestion["new_macros_training"],
+        "new_macros_rest": suggestion["new_macros_rest"],
+    })
+
+
 @app.route("/api/weekly_report")
 def get_weekly_report():
     from ai import generate_weekly_report
@@ -844,6 +911,22 @@ def get_weekly_report():
     cached = db.get_weekly_report(week_start, user_id=uid)
     if cached:
         return jsonify({"ok": True, "report": cached, "cached": True})
+
+    # Bilan non encore généré : vérifier si on est dimanche
+    today = date.today()
+    is_sunday = today.weekday() == 6  # 6 = dimanche
+    if not is_sunday:
+        # Calculer le prochain dimanche
+        days_until_sunday = (6 - today.weekday()) % 7 or 7
+        next_sunday = today + timedelta(days=days_until_sunday)
+        from datetime import datetime as _dt, time as _time
+        next_sunday_ts = int(_dt.combine(next_sunday, _time.min).timestamp())
+        return jsonify({
+            "ok": True,
+            "locked": True,
+            "next_sunday_ts": next_sunday_ts,
+            "next_sunday_str": next_sunday.strftime("%A %d %B").capitalize(),
+        })
 
     p = db.get_profile(user_id=uid)
     if not p:
@@ -1056,6 +1139,7 @@ def regenerate_meal():
     data = request.get_json()
     day_date_str = data.get("date")
     meal_type = data.get("meal_type")
+    history = data.get("history", [])  # liste des repas déjà refusés pour ce slot
 
     if not day_date_str or not meal_type:
         return jsonify({"ok": False, "error": "date ou meal_type manquant"}), 400
@@ -1115,8 +1199,31 @@ def regenerate_meal():
         try: p_diet = json.loads(p_diet)
         except Exception: p_diet = []
     p_budget = p.get("meal_budget", "equilibre")
-    new_meal = regenerate_single_meal(meal_type, day_name, remaining, current_text,
-                                      meal_diet=p_diet, meal_budget=p_budget)
+    p_style  = p.get("meal_style", "aleatoire")
+
+    # Extraire la description du repas actuel pour que l'IA propose quelque chose de différent
+    current_emoji = meal_emojis[meal_type]
+    current_meal_match = re.search(
+        rf'{re.escape(current_emoji)}[^\n]*\n(.*?)(?=\n[🌅🍽🍎🌙]|\Z)',
+        current_text, re.DOTALL
+    )
+    current_meal_desc = current_meal_match.group(1).strip() if current_meal_match else ""
+
+    # Passer les descriptions des autres repas (sans macros) pour éviter les répétitions
+    other_descs = []
+    for mtype, em in meal_emojis.items():
+        if mtype == meal_type:
+            continue
+        m = re.search(rf'{re.escape(em)}[^\n]*\n(.*?)(?=\n[🌅🍽🍎🌙]|\Z)', current_text, re.DOTALL)
+        if m:
+            other_descs.append(m.group(1).strip())
+    other_meals_str = " | ".join(other_descs)
+
+    new_meal = regenerate_single_meal(meal_type, day_name, remaining, other_meals_str,
+                                      meal_diet=p_diet, meal_budget=p_budget,
+                                      meal_style=p_style,
+                                      current_meal=current_meal_desc,
+                                      history=history)
     # new_meal = "🍽 Déjeuner (Xkcal | ...)\ndescription"
     new_desc_lines = new_meal.split("\n")[1:]
     new_desc = "\n".join(new_desc_lines).strip()
@@ -1424,7 +1531,8 @@ def _generate_week_meals_only(profile: dict, week_start: str, user_id: int = 1,
         try: meal_diet = json.loads(meal_diet)
         except Exception: meal_diet = []
     meal_budget = profile.get("meal_budget", "equilibre")
-    diet_hint = _diet_budget_hint(meal_diet, meal_budget)
+    meal_style  = profile.get("meal_style", "aleatoire")
+    diet_hint = _diet_budget_hint(meal_diet, meal_budget, meal_style)
 
     # Construire les cibles par jour pour guider l'IA
     day_targets = {}
@@ -1519,26 +1627,26 @@ JSON uniquement :
     }
 
     def _parse_meal_entry(entry, day):
-        """Extrait desc + macros par repas depuis l'entrée IA (ancien ou nouveau format)."""
+        """Extrait les descriptions IA et injecte les macros cibles du profil (pas les estimations IA)."""
         result = {}
         targets = day_targets[day]
-        default_macros = _split_macros(targets)
+        target_macros = _split_macros(targets)  # macros calculées depuis le profil = source de vérité
         for key in MEAL_KEYS:
             raw_val = entry.get(key, {})
+            mk = "petit_dej" if key == "petit_dejeuner" else key
+            tm = target_macros[mk]
             if isinstance(raw_val, dict):
-                desc  = str(raw_val.get("desc", DEFAULT_DESCS[key])).strip()
-                dm    = default_macros[key if key != "petit_dejeuner" else "petit_dej"]
-                kcal  = int(raw_val.get("kcal", dm["kcal"]))
-                p     = int(raw_val.get("p",    dm["p"]))
-                g     = int(raw_val.get("g",    dm["g"]))
-                l     = int(raw_val.get("l",    dm["l"]))
+                desc = str(raw_val.get("desc", DEFAULT_DESCS[key])).strip()
             else:
-                # Ancien format (string) — fallback macros fixe
                 desc = str(raw_val).strip() or DEFAULT_DESCS[key]
-                mk   = key if key != "petit_dejeuner" else "petit_dej"
-                dm   = default_macros[mk]
-                kcal, p, g, l = dm["kcal"], dm["p"], dm["g"], dm["l"]
-            result[key] = {"desc": _clean_desc(desc), "kcal": kcal, "p": p, "g": g, "l": l}
+            # Les macros viennent toujours du profil, jamais de l'IA
+            result[key] = {
+                "desc": _clean_desc(desc),
+                "kcal": tm["kcal"],
+                "p":    tm["p"],
+                "g":    tm["g"],
+                "l":    tm["l"],
+            }
         return result
 
     def _build_text_from_parsed(parsed, targets):

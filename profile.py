@@ -240,6 +240,87 @@ def get_weekly_weight_trend(weight_logs: list[dict]) -> dict:
     }
 
 
+def _apply_calorie_delta(macros: dict, delta_kcal: int, weight_kg: float) -> dict:
+    """Applique un delta calorique : protéines figées, glucides ajustés en premier."""
+    new_kcal = max(1200, macros["calories"] + delta_kcal)
+    protein_g = round(weight_kg * 2.2)
+    fat_g = round(new_kcal * 0.27 / 9)
+    carbs_g = max(50, round((new_kcal - protein_g * 4 - fat_g * 9) / 4))
+    return {"calories": new_kcal, "protein_g": protein_g, "carbs_g": carbs_g, "fat_g": fat_g}
+
+
+def suggest_macro_adjustment(profile: dict, weight_logs: list) -> dict:
+    """
+    Compare la progression réelle du poids à l'objectif et suggère un ajustement calorique.
+    Nécessite au moins 14 logs (2 semaines) pour être fiable.
+    """
+    if len(weight_logs) < 14:
+        return {"should_adjust": False, "reason": "insufficient_data"}
+
+    try:
+        current_training = json.loads(profile.get("macros_training") or "{}")
+        current_rest = json.loads(profile.get("macros_rest") or "{}")
+    except Exception:
+        return {"should_adjust": False, "reason": "no_macros"}
+
+    if not current_training.get("calories"):
+        return {"should_adjust": False, "reason": "no_macros"}
+
+    trend = get_weekly_weight_trend(weight_logs)
+    goal = profile.get("goal", "recomposition")
+    weekly_change = trend["weekly_change"]
+    trend_type = trend["trend"]
+    weight_kg = float(profile.get("weight_kg", 80))
+
+    delta_kcal = 0
+    reason = ""
+
+    if goal == "perte_gras":
+        if trend_type == "perte_trop_rapide":
+            delta_kcal = +150
+            reason = (f"Tu perds {abs(weekly_change):.1f} kg/semaine — c'est trop rapide et tu risques "
+                      f"de perdre du muscle. On augmente de 150 kcal.")
+        elif trend_type in ("stable", "prise_de_poids"):
+            delta_kcal = -150
+            reason = (f"Ton poids évolue de {weekly_change:+.1f} kg/semaine — la progression est insuffisante. "
+                      f"On réduit de 150 kcal pour relancer la perte.")
+
+    elif goal == "prise_masse":
+        if trend_type in ("perte_trop_rapide", "en_bonne_voie"):
+            delta_kcal = +150
+            reason = (f"Tu évolues de {weekly_change:+.1f} kg/semaine — insuffisant pour une prise de masse. "
+                      f"On augmente de 150 kcal.")
+        elif trend_type == "stable":
+            delta_kcal = +100
+            reason = "Ton poids est stable. On augmente légèrement pour stimuler la prise de masse."
+        elif trend_type == "prise_de_poids" and weekly_change > 0.4:
+            delta_kcal = -100
+            reason = (f"Tu prends {weekly_change:+.1f} kg/semaine — légèrement trop rapide. "
+                      f"On réduit de 100 kcal pour limiter la prise de gras.")
+
+    elif goal == "recomposition":
+        if trend_type == "perte_trop_rapide":
+            delta_kcal = +150
+            reason = (f"Tu perds {abs(weekly_change):.1f} kg/semaine — trop vite pour une recomposition. "
+                      f"On augmente de 150 kcal.")
+        elif trend_type == "prise_de_poids" and weekly_change > 0.2:
+            delta_kcal = -150
+            reason = (f"Tu prends {weekly_change:+.1f} kg/semaine. "
+                      f"On réduit de 150 kcal pour rééquilibrer.")
+
+    if delta_kcal == 0:
+        return {"should_adjust": False, "reason": "on_track", "trend": trend}
+
+    return {
+        "should_adjust": True,
+        "delta_kcal": delta_kcal,
+        "reason": reason,
+        "trend": trend,
+        "new_macros_training": _apply_calorie_delta(current_training, delta_kcal, weight_kg),
+        "new_macros_rest": _apply_calorie_delta(current_rest, delta_kcal, weight_kg),
+    }
+
+
 def format_macros_message(targets: dict) -> str:
     label = "Jour de repos" if targets["is_rest_day"] else "Jour d'entraînement"
     return (

@@ -176,6 +176,57 @@
         margin-bottom: 1rem;
       }
 
+      /* ─── MACRO ADJUSTMENT BANNER ─── */
+      .macro-adjust-banner {
+        background: linear-gradient(135deg, rgba(255,160,0,.12), rgba(255,100,0,.08));
+        border: 1px solid rgba(255,160,0,.35);
+        border-radius: 12px;
+        padding: .9rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: .6rem;
+      }
+      .macro-adjust-banner .banner-title {
+        font-size: .8rem;
+        font-weight: 700;
+        color: #ffa000;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+      .macro-adjust-banner .banner-reason {
+        font-size: .82rem;
+        color: var(--text);
+        line-height: 1.4;
+      }
+      .macro-adjust-banner .banner-delta {
+        font-size: .78rem;
+        color: var(--muted);
+      }
+      .macro-adjust-banner .banner-actions {
+        display: flex;
+        gap: .5rem;
+        margin-top: .1rem;
+      }
+      .btn-adjust-apply {
+        background: #ffa000;
+        color: #000;
+        border: none;
+        border-radius: 8px;
+        padding: .4rem .9rem;
+        font-size: .8rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn-adjust-ignore {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: .4rem .9rem;
+        font-size: .8rem;
+        cursor: pointer;
+      }
+
       /* ─── MACRO CARDS ─── */
       .macro-grid {
         display: grid;
@@ -2170,6 +2221,17 @@
           </div>
         </div>
 
+        <!-- Bannière ajustement macros -->
+        <div id="macro-adjust-banner" style="display:none;" class="macro-adjust-banner">
+          <div class="banner-title">📊 Ajustement suggéré</div>
+          <div class="banner-reason" id="macro-adjust-reason"></div>
+          <div class="banner-delta" id="macro-adjust-delta"></div>
+          <div class="banner-actions">
+            <button class="btn-adjust-apply" onclick="applyMacroAdjustment()">Appliquer</button>
+            <button class="btn-adjust-ignore" onclick="document.getElementById('macro-adjust-banner').style.display='none'">Ignorer</button>
+          </div>
+        </div>
+
         <div class="grid-2">
           <div class="card">
             <div class="card-title">Progression vers l'objectif</div>
@@ -2494,7 +2556,19 @@
         <div class="report-card" id="report-card">
           <div class="card-title">Semaine du <span id="report-week-label">—</span></div>
           <div id="report-content"><div class="report-empty">Génère ton bilan pour cette semaine.</div></div>
-          <button class="btn-gen-report" id="btn-gen-report" onclick="generateReport()">✨ Générer le bilan</button>
+          <div id="report-next" style="display:none;margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border);text-align:center;">
+            <div style="font-size:.78rem;color:var(--muted);margin-bottom:.4rem;">Prochain bilan dans</div>
+            <div style="font-size:1.2rem;font-weight:700;color:var(--blue);font-variant-numeric:tabular-nums;" id="report-next-countdown">—</div>
+            <div style="font-size:.7rem;color:var(--muted);margin-top:.15rem;">jj : hh : mm : ss</div>
+          </div>
+          <div id="report-locked" style="display:none;text-align:center;padding:1.2rem 0 .4rem;">
+            <div style="font-size:2rem;margin-bottom:.5rem;">🔒</div>
+            <div style="font-weight:700;font-size:.95rem;color:var(--text);margin-bottom:.3rem;">Bilan disponible dimanche</div>
+            <div style="font-size:.82rem;color:var(--muted);margin-bottom:.9rem;">Disponible <span id="report-unlock-day"></span></div>
+            <div style="font-size:1.4rem;font-weight:700;color:var(--blue);font-variant-numeric:tabular-nums;" id="report-countdown">—</div>
+            <div style="font-size:.72rem;color:var(--muted);margin-top:.2rem;">jj : hh : mm : ss</div>
+          </div>
+          <button class="btn-gen-report" id="btn-gen-report" onclick="generateReport()" style="display:none;">✨ Générer le bilan</button>
         </div>
       </div>
 
@@ -2734,6 +2808,16 @@
                   <div class="activity-opt" data-budget="economique" onclick="selectMealBudget('economique',this)">€ Économique</div>
                   <div class="activity-opt active" data-budget="equilibre" onclick="selectMealBudget('equilibre',this)">€€ Équilibré</div>
                   <div class="activity-opt" data-budget="premium"    onclick="selectMealBudget('premium',this)">€€€ Gourmand</div>
+                </div>
+              </div>
+              <div class="form-group full" style="margin-top:.7rem">
+                <label style="font-size:.82rem;color:var(--muted)">Style de cuisine</label>
+                <input type="hidden" id="meal_style_input" value="aleatoire" />
+                <div class="activity-opts" id="profile-style-opts" style="margin-top:.4rem;flex-wrap:wrap;gap:.4rem">
+                  <div class="activity-opt" data-style="basique"      onclick="selectMealStyle('basique',this)">🥣 Basique</div>
+                  <div class="activity-opt" data-style="simple_varie" onclick="selectMealStyle('simple_varie',this)">🍱 Simple & varié</div>
+                  <div class="activity-opt" data-style="gourmet"      onclick="selectMealStyle('gourmet',this)">👨‍🍳 Créatif</div>
+                  <div class="activity-opt active" data-style="aleatoire" onclick="selectMealStyle('aleatoire',this)">🎲 Aléatoire</div>
                 </div>
               </div>
             </div>
@@ -3348,6 +3432,26 @@
             </div>
           </div>
 
+          <div style="font-size:.78rem;color:var(--muted);margin:.8rem 0 .2rem">Style de cuisine</div>
+          <div class="ob-choices" style="flex-direction:column;gap:.5rem">
+            <div class="ob-choice" onclick="obSelectStyle('basique',this)" id="ob-style-basique">
+              <span class="ob-choice-icon">🥣</span>
+              <div><strong>Basique</strong><div style="font-size:.78rem;color:var(--muted)">Riz/poulet, pâtes/thon, œufs/légumes — rapide et sans prise de tête</div></div>
+            </div>
+            <div class="ob-choice" onclick="obSelectStyle('simple_varie',this)" id="ob-style-simple_varie">
+              <span class="ob-choice-icon">🍱</span>
+              <div><strong>Simple & varié</strong><div style="font-size:.78rem;color:var(--muted)">Facile à cuisiner, mais plusieurs cuisines différentes</div></div>
+            </div>
+            <div class="ob-choice" onclick="obSelectStyle('gourmet',this)" id="ob-style-gourmet">
+              <span class="ob-choice-icon">👨‍🍳</span>
+              <div><strong>Créatif & gourmand</strong><div style="font-size:.78rem;color:var(--muted)">Recettes élaborées, saveurs prononcées, cuisines du monde</div></div>
+            </div>
+            <div class="ob-choice selected" onclick="obSelectStyle('aleatoire',this)" id="ob-style-aleatoire">
+              <span class="ob-choice-icon">🎲</span>
+              <div><strong>Aléatoire</strong><div style="font-size:.78rem;color:var(--muted)">Sans préférence — l'IA choisit librement</div></div>
+            </div>
+          </div>
+
           <div class="ob-nav">
             <button class="ob-btn-back" onclick="obBack(11)">←</button>
             <button class="ob-btn-next" onclick="obNext(11)">Continuer →</button>
@@ -3660,6 +3764,23 @@
       </div>
     </div>
 
+    <!-- Modale pesée de fin de semaine (bloquante) -->
+    <div id="weight-gate-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:500;align-items:center;justify-content:center;padding:1rem;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:1.8rem 1.5rem;max-width:360px;width:100%;text-align:center;display:flex;flex-direction:column;gap:1rem;">
+        <div style="font-size:2rem;">⚖️</div>
+        <div style="font-weight:700;font-size:1.1rem;color:var(--text);">Pesée de fin de semaine</div>
+        <div id="weight-gate-msg" style="font-size:.85rem;color:var(--muted);line-height:1.5;"></div>
+        <input id="weight-gate-input" type="number" step="0.1" min="20" max="300"
+          placeholder="Ex : 78.5"
+          style="width:100%;padding:.75rem;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:1rem;text-align:center;box-sizing:border-box;"
+          onkeydown="if(event.key==='Enter') submitWeightGate();" />
+        <button onclick="submitWeightGate()"
+          style="background:var(--blue);color:#fff;border:none;border-radius:10px;padding:.8rem;font-size:.95rem;font-weight:700;cursor:pointer;width:100%;">
+          Enregistrer mon poids
+        </button>
+      </div>
+    </div>
+
     <!-- Modale de confirmation recalcul profil -->
     <div
       id="profile-confirm-overlay"
@@ -3944,6 +4065,57 @@
         // Pré-charger les données stats
         buildChartData(logs);
         fillWeightLog(logs);
+
+        // Vérifier si un ajustement de macros est suggéré
+        checkMacroAdjustment();
+      }
+
+      async function checkMacroAdjustment() {
+        try {
+          const res = await fetch("/api/macro_adjustment");
+          const data = await res.json();
+          if (!data.ok || !data.should_adjust) return;
+          const banner = document.getElementById("macro-adjust-banner");
+          const sign = data.delta_kcal > 0 ? "+" : "";
+          document.getElementById("macro-adjust-reason").textContent = data.reason;
+          document.getElementById("macro-adjust-delta").textContent =
+            `Modification : ${sign}${data.delta_kcal} kcal/jour — Entraînement : ${data.new_macros_training.calories} kcal | Repos : ${data.new_macros_rest.calories} kcal`;
+          banner.style.display = "flex";
+        } catch (e) { /* silencieux */ }
+      }
+
+      async function applyMacroAdjustment() {
+        const banner = document.getElementById("macro-adjust-banner");
+        const btn = banner.querySelector(".btn-adjust-apply");
+        btn.disabled = true;
+        btn.textContent = "…";
+        try {
+          const res = await fetch("/api/macro_adjustment/apply", { method: "POST" });
+          const data = await res.json();
+          if (data.ok) {
+            // Mettre à jour l'affichage des macros
+            const mt = data.new_macros_training;
+            const mr = data.new_macros_rest;
+            document.getElementById("d-cal-train").textContent  = mt.calories;
+            document.getElementById("d-prot-train").textContent = mt.protein_g;
+            document.getElementById("d-carb-train").textContent = mt.carbs_g;
+            document.getElementById("d-fat-train").textContent  = mt.fat_g;
+            document.getElementById("d-cal-rest").textContent   = mr.calories;
+            document.getElementById("d-prot-rest").textContent  = mr.protein_g;
+            document.getElementById("d-carb-rest").textContent  = mr.carbs_g;
+            document.getElementById("d-fat-rest").textContent   = mr.fat_g;
+            banner.style.display = "none";
+            showToast(`✅ Macros ajustées (${data.delta_kcal > 0 ? "+" : ""}${data.delta_kcal} kcal)`);
+          } else {
+            showToast("❌ Erreur lors de l'ajustement", true);
+            btn.disabled = false;
+            btn.textContent = "Appliquer";
+          }
+        } catch (e) {
+          showToast("❌ Erreur", true);
+          btn.disabled = false;
+          btn.textContent = "Appliquer";
+        }
       }
 
       function loadTodaySession(weekday) {
@@ -4185,6 +4357,7 @@
       let currentYear = new Date().getFullYear(),
         currentMonth = new Date().getMonth() + 1;
       let currentDayDate = null;
+      const regenHistory = {}; // { "YYYY-MM-DD_mealType": ["desc1", "desc2", ...] }
 
       function setCalView(v) {
         calView = v;
@@ -4777,10 +4950,18 @@
           btn.innerHTML = `<span class="spinning">↺</span>`;
         }
 
+        // Récupérer la description du repas actuel avant de le remplacer
+        const histKey = `${currentDayDate}_${mealType}`;
+        const bodyEl = document.querySelector(`#section-${mealType} .meal-section-body`);
+        if (bodyEl && bodyEl.textContent.trim()) {
+          if (!regenHistory[histKey]) regenHistory[histKey] = [];
+          regenHistory[histKey].push(bodyEl.textContent.trim());
+        }
+
         const res = await fetch("/api/regenerate_meal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: currentDayDate, meal_type: mealType }),
+          body: JSON.stringify({ date: currentDayDate, meal_type: mealType, history: regenHistory[histKey] || [] }),
         });
         const data = await res.json();
 
@@ -4838,6 +5019,7 @@
                      : (typeof p.meal_diet === 'string' ? JSON.parse(p.meal_diet || '[]') : []);
         setMealDiet(diet);
         setMealBudget(p.meal_budget || 'equilibre');
+        selectMealStyle(p.meal_style || 'aleatoire', null);
       }
 
       function setSexe(val) {
@@ -4927,6 +5109,13 @@
         document.querySelectorAll('#profile-budget-opts [data-budget]').forEach(e => e.classList.remove('active'));
         el.classList.add('active');
         document.getElementById('meal_budget_input').value = val;
+      }
+
+      function selectMealStyle(val, el) {
+        document.querySelectorAll('#profile-style-opts [data-style]').forEach(e => e.classList.remove('active'));
+        if (el) el.classList.add('active');
+        else document.querySelector(`#profile-style-opts [data-style="${val}"]`)?.classList.add('active');
+        document.getElementById('meal_style_input').value = val;
       }
 
       function toggleProfileRestDay(dow, el) {
@@ -5186,6 +5375,7 @@
             training_days: "0,1,2,3,5,6",
             meal_diet: JSON.parse(document.getElementById('meal_diet_input')?.value || '[]'),
             meal_budget: document.getElementById('meal_budget_input')?.value || 'equilibre',
+            meal_style: document.getElementById('meal_style_input')?.value || 'aleatoire',
           };
 
           // Détecter les champs qui impactent les calculs
@@ -5804,10 +5994,26 @@
           btn.innerHTML = '<span class="spinning">↺</span>';
         }
 
-        const res = await fetch("/api/suggest_day_meals", {
+        // Calculer la date exacte du jour en cours dans le wizard
+        const dayDate = new Date(wizardWeekStart);
+        dayDate.setDate(dayDate.getDate() + wizardStep);
+        const dayDateStr = dayDate.toLocaleDateString("fr-CA"); // YYYY-MM-DD
+
+        // Mémoriser le repas actuel avant de le remplacer
+        const histKey = `${dayDateStr}_${mealKey}`;
+        const currentBody = document.getElementById("wz-body-" + mealKey)?.value?.trim();
+        if (currentBody) {
+          if (!regenHistory[histKey]) regenHistory[histKey] = [];
+          regenHistory[histKey].push(currentBody);
+        }
+
+        // Sauvegarder l'état actuel avant de régénérer
+        wizardTexts[wizardStep] = buildWizardText();
+
+        const res = await fetch("/api/regenerate_meal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ day: wizardStep }),
+          body: JSON.stringify({ date: dayDateStr, meal_type: mealKey, history: regenHistory[histKey] || [] }),
         });
         const data = await res.json();
         if (btn) {
@@ -6083,6 +6289,7 @@
       // ── Préférences repas (step 11) ──
       let _obDietSelected = [];
       let _obBudgetSelected = 'equilibre';
+      let _obStyleSelected = 'aleatoire';
 
       function obToggleDiet(val, el) {
         const idx = _obDietSelected.indexOf(val);
@@ -6106,6 +6313,12 @@
       function obSelectBudget(val, el) {
         _obBudgetSelected = val;
         document.querySelectorAll('#ob-step-11 .ob-choice[id^="ob-budget-"]').forEach(e => e.classList.remove('selected'));
+        el.classList.add('selected');
+      }
+
+      function obSelectStyle(val, el) {
+        _obStyleSelected = val;
+        document.querySelectorAll('#ob-step-11 .ob-choice[id^="ob-style-"]').forEach(e => e.classList.remove('selected'));
         el.classList.add('selected');
       }
 
@@ -6266,6 +6479,7 @@
           training_days: "0,1,2,3,5,6",
           meal_diet:   _obDietSelected,
           meal_budget: _obBudgetSelected || 'equilibre',
+          meal_style:  _obStyleSelected  || 'aleatoire',
         };
         try {
           const r1 = await fetch("/api/profile", {
@@ -6448,11 +6662,60 @@
       }
 
       // ── INIT ──
-      checkOnboarding().then(() => {
+      checkOnboarding().then(async () => {
         loadDashboard();
         loadProfile();
         loadCoupleStatus();
+        await checkWeightGate();
       });
+
+      async function checkWeightGate() {
+        try {
+          const res = await fetch("/api/needs_weight_log");
+          const data = await res.json();
+          if (!data.needs_log) return;
+          document.getElementById("weight-gate-msg").textContent = data.message;
+          document.getElementById("weight-gate-overlay").style.display = "flex";
+          document.getElementById("weight-gate-input").focus();
+        } catch (e) { /* silencieux */ }
+      }
+
+      async function submitWeightGate() {
+        const input = document.getElementById("weight-gate-input");
+        const val = parseFloat(input.value);
+        if (!val || val < 20 || val > 300) {
+          input.style.borderColor = "var(--red, #e74c3c)";
+          setTimeout(() => input.style.borderColor = "", 1000);
+          return;
+        }
+        const btn = document.querySelector("#weight-gate-overlay button");
+        btn.disabled = true;
+        btn.textContent = "…";
+        try {
+          const res = await fetch("/api/log_weight", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ weight_kg: val }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            document.getElementById("weight-gate-overlay").style.display = "none";
+            showToast("✅ Poids enregistré !");
+            // Rafraîchir le dashboard + vérifier ajustement macros
+            loadDashboard();
+            // Petit délai pour laisser le dashboard se recharger
+            setTimeout(checkMacroAdjustment, 800);
+          } else {
+            showToast("❌ " + (data.error || "Erreur"), true);
+            btn.disabled = false;
+            btn.textContent = "Enregistrer mon poids";
+          }
+        } catch (e) {
+          showToast("❌ Erreur réseau", true);
+          btn.disabled = false;
+          btn.textContent = "Enregistrer mon poids";
+        }
+      }
 
       // ── Service Worker (PWA) ──
       if ('serviceWorker' in navigator) {
@@ -6578,8 +6841,19 @@
       }
 
       // ── Bilan hebdomadaire ─────────────────────────────────────────────────
+      let _countdownInterval = null;
+
+      function _currentWeekStart() {
+        const today = new Date();
+        const day = today.getDay();
+        const diff = day === 0 ? -6 : 1 - day; // ramener au lundi
+        const monday = new Date(today);
+        monday.setDate(today.getDate() + diff);
+        return monday.toLocaleDateString('fr-CA'); // YYYY-MM-DD
+      }
+
       async function initBilanPage() {
-        const ws = weekDays.length ? weekDays[0].week_start : db_week_start || '';
+        const ws = (weekDays.length ? weekDays[0].week_start : null) || _currentWeekStart();
         const label = ws ? (() => {
           const d = new Date(ws + 'T00:00:00');
           const end = new Date(d); end.setDate(d.getDate() + 6);
@@ -6590,51 +6864,123 @@
         el.textContent = label;
         el.dataset.weekStart = ws;
 
-        // Réinitialise le contenu à chaque ouverture/switch de profil
         document.getElementById('report-content').innerHTML =
-          '<div class="report-empty">Génère ton bilan pour cette semaine.</div>';
+          '<div class="report-empty">Chargement...</div>';
+        document.getElementById('report-locked').style.display = 'none';
+        document.getElementById('report-next').style.display = 'none';
         const btn = document.getElementById('btn-gen-report');
-        btn.disabled = false;
+        btn.style.display = 'none';
+        if (_countdownInterval) { clearInterval(_countdownInterval); _countdownInterval = null; }
+        if (_nextCountdownInterval) { clearInterval(_nextCountdownInterval); _nextCountdownInterval = null; }
 
-        // Charge le bilan si déjà généré pour ce profil
-        if (ws) {
-          try {
-            const res = await fetch(`/api/weekly_report?week_start=${ws}`);
-            const data = await res.json();
-            if (data.ok && data.cached) {
-              const html = data.report
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/^[-•]\s/gm, '<span style="color:var(--blue)">•</span> ')
-                .replace(/\n/g, '<br>');
-              document.getElementById('report-content').innerHTML =
-                `<div class="report-body">${html}</div>`;
-              btn.textContent = '↺ Régénérer';
-            } else {
-              btn.textContent = '✨ Générer le bilan';
-            }
-          } catch { btn.textContent = '✨ Générer le bilan'; }
+        if (!ws) return;
+
+        const res = await fetch(`/api/weekly_report?week_start=${ws}`);
+        const data = await res.json();
+
+        if (data.ok && data.cached) {
+          // Bilan déjà généré → afficher + countdown prochain dimanche
+          _showReport(data.report);
+          btn.style.display = 'none';
+          _startNextCountdown();
+          return;
         }
+
+        if (data.locked) {
+          // Verrouillé : afficher le compte à rebours
+          document.getElementById('report-content').innerHTML = '';
+          document.getElementById('report-locked').style.display = 'block';
+          document.getElementById('report-unlock-day').textContent = data.next_sunday_str || 'dimanche';
+          btn.style.display = 'none';
+          _startCountdown(data.next_sunday_ts);
+          return;
+        }
+
+        // Dimanche et non généré → auto-générer
+        document.getElementById('report-content').innerHTML =
+          `<div style="color:var(--muted);font-size:.84rem;display:flex;align-items:center;gap:.5rem"><span class="spinning">↺</span> L'IA analyse ta semaine...</div>`;
+        generateReport();
+      }
+
+      function _showReport(text) {
+        const html = text
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/^[-•]\s/gm, '<span style="color:var(--blue)">•</span> ')
+          .replace(/\n/g, '<br>');
+        document.getElementById('report-content').innerHTML = `<div class="report-body">${html}</div>`;
+      }
+
+      function _nextSundayTs() {
+        const now = new Date();
+        const day = now.getDay(); // 0=dim, 1=lun...
+        const daysUntil = day === 0 ? 7 : 7 - day; // toujours le PROCHAIN dimanche
+        const next = new Date(now);
+        next.setDate(now.getDate() + daysUntil);
+        next.setHours(0, 0, 0, 0);
+        return Math.floor(next.getTime() / 1000);
+      }
+
+      let _nextCountdownInterval = null;
+
+      function _startNextCountdown() {
+        const section = document.getElementById('report-next');
+        const el = document.getElementById('report-next-countdown');
+        section.style.display = 'block';
+        if (_nextCountdownInterval) clearInterval(_nextCountdownInterval);
+        const targetTs = _nextSundayTs();
+        function tick() {
+          const diff = targetTs * 1000 - Date.now();
+          if (diff <= 0) { clearInterval(_nextCountdownInterval); el.textContent = 'Disponible !'; return; }
+          const s = Math.floor(diff / 1000);
+          const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+                m = Math.floor((s % 3600) / 60), sec = s % 60;
+          el.textContent = `${String(d).padStart(2,'0')} : ${String(h).padStart(2,'0')} : ${String(m).padStart(2,'0')} : ${String(sec).padStart(2,'0')}`;
+        }
+        tick();
+        _nextCountdownInterval = setInterval(tick, 1000);
+      }
+
+      function _startCountdown(targetTs) {
+        const el = document.getElementById('report-countdown');
+        function tick() {
+          const diff = targetTs * 1000 - Date.now();
+          if (diff <= 0) {
+            clearInterval(_countdownInterval);
+            el.textContent = 'Disponible maintenant !';
+            // Recharger la page bilan automatiquement
+            initBilanPage();
+            return;
+          }
+          const totalSec = Math.floor(diff / 1000);
+          const d = Math.floor(totalSec / 86400);
+          const h = Math.floor((totalSec % 86400) / 3600);
+          const m = Math.floor((totalSec % 3600) / 60);
+          const s = totalSec % 60;
+          el.textContent = `${String(d).padStart(2,'0')} : ${String(h).padStart(2,'0')} : ${String(m).padStart(2,'0')} : ${String(s).padStart(2,'0')}`;
+        }
+        tick();
+        _countdownInterval = setInterval(tick, 1000);
       }
 
       async function generateReport() {
         const btn = document.getElementById('btn-gen-report');
         btn.disabled = true;
+        btn.style.display = 'block';
         btn.textContent = '⏳ Génération...';
-        document.getElementById('report-content').innerHTML =
-          `<div style="color:var(--muted);font-size:.84rem;display:flex;align-items:center;gap:.5rem"><span class="spinning">↺</span> L'IA analyse ta semaine...</div>`;
+        document.getElementById('report-locked').style.display = 'none';
 
         const weekStart = document.getElementById('report-week-label').dataset.weekStart || '';
         try {
           const res = await fetch(`/api/weekly_report?week_start=${weekStart}`);
           const data = await res.json();
-          if (data.ok) {
-            const html = data.report
-              .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-              .replace(/^[-•]\s/gm, '<span style="color:var(--blue)">•</span> ')
-              .replace(/\n/g, '<br>');
-            document.getElementById('report-content').innerHTML =
-              `<div class="report-body">${html}</div>`;
-            btn.textContent = data.cached ? '↺ Régénérer' : '✨ Générer le bilan';
+          if (data.ok && data.report) {
+            _showReport(data.report);
+            btn.style.display = 'none';
+          } else if (data.locked) {
+            // Ne devrait pas arriver mais sécurité
+            document.getElementById('report-content').innerHTML = '';
+            document.getElementById('report-locked').style.display = 'block';
+            btn.style.display = 'none';
           } else {
             document.getElementById('report-content').innerHTML =
               `<div class="report-empty">Erreur : ${escapeHtml(data.error || '')}</div>`;
