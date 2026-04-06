@@ -6123,14 +6123,18 @@
           pill.className = "ob-choice";
           pill.style.cssText = "min-width:120px;padding:.5rem .9rem;font-size:.88rem;";
 
-          if (isPast) {
+          const diffDays = Math.round((monday - today) / 86400000);
+          // Le lundi de la semaine courante (week===0) est toujours cliquable même s'il est passé
+          const isCurrentWeekMonday = week === 0;
+          const isDisabled = isPast && !isCurrentWeekMonday;
+
+          if (isDisabled) {
             pill.style.opacity = "0.4";
             pill.style.cursor = "not-allowed";
           }
 
-          const diffDays = Math.round((monday - today) / 86400000);
           const label = week === 0
-            ? (isPast ? `Lundi passé` : diffDays === 0 ? `Aujourd'hui` : `Ce lundi`)
+            ? (isPast ? `Lundi de cette semaine` : diffDays === 0 ? `Aujourd'hui` : `Ce lundi`)
             : week === 1
               ? `Lundi prochain`
               : `Dans ${week} semaines`;
@@ -6139,13 +6143,13 @@
           pill.innerHTML = `<span class="ob-choice-icon">📅</span>${label}<br><small style="color:var(--muted)">${dateLabel}</small>`;
           pill.dataset.isoDate = isoStr;
 
-          if (!isPast) {
+          if (!isDisabled) {
             pill.onclick = () => {
               container.querySelectorAll(".ob-choice").forEach((c) => c.classList.remove("selected"));
               pill.classList.add("selected");
               storeFn(isoStr);
             };
-            // Sélectionner le premier lundi non passé par défaut
+            // Sélectionner le premier lundi disponible par défaut
             if (!defaultSet) {
               pill.classList.add("selected");
               storeFn(isoStr);
