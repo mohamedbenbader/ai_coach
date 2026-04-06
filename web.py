@@ -270,28 +270,6 @@ def couple_setup():
             p_partner["extra_sports"] = parse_extra_sports(p_partner.get("extra_sports"))
             _apply_partner_macros_to_existing_meals(p_partner, week_start, partner_id, uid)
 
-        # Liste de courses combinée (maintenant que les deux profils ont leurs repas)
-        try:
-            from ai import generate_shopping_from_meals
-            main_summary = ""
-            partner_summary = ""
-            for day_num in range(7):
-                t_main = db.get_daily_plan(week_start, day_num, user_id=uid)
-                if t_main:
-                    main_summary += f"{DAYS_FR[day_num]} :\n{t_main[:1200]}\n\n"
-                t_partner = db.get_daily_plan(week_start, day_num, user_id=partner_id)
-                if t_partner:
-                    partner_summary += f"{DAYS_FR[day_num]} :\n{t_partner[:1200]}\n\n"
-            if main_summary:
-                combined = ("=== Profil 1 ===\n" + main_summary +
-                            "\n=== Profil 2 ===\n" + partner_summary) if partner_summary else main_summary
-                shopping = generate_shopping_from_meals(combined, is_couple=bool(partner_summary))
-                db.save_weekly_shopping(week_start, shopping, user_id=uid)
-                db.save_weekly_shopping(week_start, shopping, user_id=partner_id)
-        except Exception:
-            logging.warning("[couple_setup] shopping auto-generation failed (non-fatal): %s",
-                            traceback.format_exc())
-
         return jsonify({"ok": True, "partner_id": partner_id, "partner_name": partner_payload["name"]})
     except Exception as e:
         logging.error("[couple_setup] %s", traceback.format_exc())
@@ -424,14 +402,14 @@ def save_profile_route():
                 new_text = ai_mod._build_meal_text(descs, macros, targets)
                 db.save_daily_plan(week_start, day, new_text, user_id=uid)
 
-            # Si couple : rescale aussi les repas du partenaire selon le nouveau ratio
-            main_uid   = session["user_id"]
+            # Si couple et que l'utilisateur actif est le profil PRINCIPAL : rescale le partenaire
+            main_uid    = session["user_id"]
             partner_uid = db.get_partner_user_id(main_uid)
-            if partner_uid:
+            if partner_uid and partner_uid != uid:
                 p_partner = db.get_profile(user_id=partner_uid)
                 if p_partner:
                     p_partner["extra_sports"] = parse_extra_sports(p_partner.get("extra_sports"))
-                    _apply_partner_macros_to_existing_meals(p_partner, week_start, partner_uid, uid)
+                    _apply_partner_macros_to_existing_meals(p_partner, week_start, partner_uid, main_uid)
         except Exception:
             logging.warning("[save_profile] meal rescale failed (non-fatal): %s", traceback.format_exc())
 
@@ -1090,52 +1068,102 @@ def regenerate_meal():
     }
 
     new_meal = regenerate_single_meal(meal_type, day_name, remaining, current_text)
+    # new_meal = "🍽 Déjeuner (Xkcal | ...)\ndescription"
+    new_desc_lines = new_meal.split("\n")[1:]
+    new_desc = "\n".join(new_desc_lines).strip()
 
-    updated_text = _replace_meal_section(current_text, meal_type, new_meal)
-    updated_text = _recalc_total(updated_text)
+    # Reconstruit le texte complet en conservant les macros actuelles des autres repas
+    meal_key_map = {"petit_dejeuner": "petit_dej", "dejeuner": "dejeuner",
+                    "collation": "collation", "diner": "diner"}
+    import re as _re
+    EMOJI_KEYS = {"🌅": "petit_dej", "🍽": "dejeuner", "🍎": "collation", "🌙": "diner"}
+    existing_macros = {}
+    for em, key in EMOJI_KEYS.items():
+        m = _re.search(rf'{_re.escape(em)}[^\(]*\((\d+)kcal\s*\|\s*(\d+)g\s*P\s*\|\s*(\d+)g\s*G\s*\|\s*(\d+)g\s*L\)', current_text)
+        if m:
+            existing_macros[key] = {"kcal": int(m.group(1)), "p": int(m.group(2)),
+                                    "g": int(m.group(3)), "l": int(m.group(4))}
+        else:
+            existing_macros[key] = ai_mod._split_macros(total_targets)[key]
+
+    # Écrase le repas cible avec les vrais macros estimés par l'IA (depuis new_meal header)
+    target_key = meal_key_map[meal_type]
+    new_meal_header = new_meal.split("\n")[0]
+    nm = _re.search(r'\((\d+)kcal\s*\|\s*(\d+)g\s*P\s*\|\s*(\d+)g\s*G\s*\|\s*(\d+)g\s*L\)', new_meal_header)
+    if nm:
+        existing_macros[target_key] = {"kcal": int(nm.group(1)), "p": int(nm.group(2)),
+                                       "g": int(nm.group(3)), "l": int(nm.group(4))}
+    else:
+        existing_macros[target_key] = {"kcal": remaining["calories"], "p": remaining["protein_g"],
+                                       "g": remaining["carbs_g"],     "l": remaining["fat_g"]}
+
+    # Reconstruit les descriptions en remplaçant la cible
+    descs = _extract_meal_descriptions(current_text)
+    descs[meal_type] = new_desc
+
+    # Calcule le vrai total (somme des 4 repas avec vrais macros)
+    m = existing_macros
+    total_kcal = sum(v["kcal"] for v in m.values())
+    total_p    = sum(v["p"]    for v in m.values())
+    total_g    = sum(v["g"]    for v in m.values())
+    total_l    = sum(v["l"]    for v in m.values())
+
+    updated_text = (
+        f"🌅 Petit-déjeuner ({m['petit_dej']['kcal']}kcal | {m['petit_dej']['p']}g P | {m['petit_dej']['g']}g G | {m['petit_dej']['l']}g L)\n"
+        f"{ai_mod._clean_desc(descs.get('petit_dejeuner', ''))}\n\n"
+        f"🍽 Déjeuner ({m['dejeuner']['kcal']}kcal | {m['dejeuner']['p']}g P | {m['dejeuner']['g']}g G | {m['dejeuner']['l']}g L)\n"
+        f"{ai_mod._clean_desc(descs.get('dejeuner', ''))}\n\n"
+        f"🍎 Collation 17h30 ({m['collation']['kcal']}kcal | {m['collation']['p']}g P | {m['collation']['g']}g G | {m['collation']['l']}g L)\n"
+        f"{ai_mod._clean_desc(descs.get('collation', ''))}\n\n"
+        f"🌙 Dîner ({m['diner']['kcal']}kcal | {m['diner']['p']}g P | {m['diner']['g']}g G | {m['diner']['l']}g L)\n"
+        f"{ai_mod._clean_desc(descs.get('diner', ''))}\n\n"
+        f"Total estimé : {total_kcal}kcal | {total_p}g P | {total_g}g G | {total_l}g L"
+    )
     db.save_daily_plan(week_start, weekday, updated_text, user_id=uid)
+
+    # Mode couple : resynchronise le partenaire avec le nouveau repas
+    partner_uid = db.get_partner_user_id(session["user_id"])
+    if partner_uid and partner_uid != uid:
+        p_partner = db.get_profile(user_id=partner_uid)
+        if p_partner:
+            p_partner["extra_sports"] = parse_extra_sports(p_partner.get("extra_sports"))
+            _apply_partner_macros_to_existing_meals(p_partner, week_start, partner_uid, uid)
 
     return jsonify({"ok": True, "meals": updated_text, "new_meal": new_meal})
 
 
 def _replace_meal_section(full_text: str, meal_type: str, new_meal: str) -> str:
-    """Remplace une section repas dans le texte complet du jour."""
-    markers = {
-        "petit_dejeuner": "🌅",
-        "dejeuner":       "🍽",
-        "collation":      "🍎",
-        "diner":          "🌙",
-    }
-    # Ordre des sections pour délimiter chaque bloc
-    order = ["🌅", "🍽", "🍎", "🌙"]
-    target_emoji = markers.get(meal_type)
-    if not target_emoji or target_emoji not in full_text:
-        # Section absente, on ajoute à la fin
-        return full_text.rstrip() + "\n\n" + new_meal
+    """Remplace une section repas via regex — robuste contre les emojis dans les descriptions."""
+    import re
+    markers      = {"petit_dejeuner": "🌅", "dejeuner": "🍽", "collation": "🍎", "diner": "🌙"}
+    next_markers = {"petit_dejeuner": "🍽", "dejeuner": "🍎", "collation": "🌙", "diner": None}
 
-    idx = order.index(target_emoji)
-    next_emojis = order[idx + 1:]
+    target = markers.get(meal_type)
+    if not target:
+        return full_text
 
-    lines = full_text.split("\n")
-    in_section = False
-    start_line = end_line = -1
+    next_m = next_markers[meal_type]
+    lookahead = f'(?={re.escape(next_m)})' if next_m else r'(?=Total estimé|\Z)'
 
-    for i, line in enumerate(lines):
-        if target_emoji in line:
-            in_section = True
-            start_line = i
-        elif in_section and any(e in line for e in next_emojis):
-            end_line = i
-            break
+    # Matche depuis le header de la section jusqu'au début de la suivante (ou fin)
+    pattern = re.compile(
+        rf'{re.escape(target)}[^\n]*\n[\s\S]*?{lookahead}',
+        re.MULTILINE
+    )
 
-    if start_line == -1:
-        return full_text.rstrip() + "\n\n" + new_meal
+    # new_meal peut contenir l'emoji dans la description — on le nettoie
+    lines = new_meal.split("\n")
+    header = lines[0]
+    desc   = "\n".join(
+        l for l in lines[1:] if not any(l.startswith(e) for e in markers.values())
+    ).strip()
+    clean_meal = f"{header}\n{desc}\n\n" if desc else f"{header}\n\n"
 
-    if end_line == -1:
-        end_line = len(lines)
-
-    new_lines = lines[:start_line] + new_meal.split("\n") + [""] + lines[end_line:]
-    return "\n".join(new_lines)
+    result = pattern.sub(clean_meal, full_text)
+    if result == full_text:
+        # Section absente : on l'ajoute à la fin
+        result = full_text.rstrip() + "\n\n" + clean_meal
+    return result
 
 
 def _recalc_total(text: str) -> str:
@@ -1222,19 +1250,8 @@ Réponds UNIQUEMENT en JSON :
         macros = _split_macros(targets)
         meals = _build_meal_text(descriptions, macros, targets)
 
-        # Mode couple : même plats, quantités scalées pour le partenaire
-        partner_uid = db.get_partner_user_id(main_uid)
-        if partner_uid and partner_uid != uid:
-            p_partner = db.get_profile(user_id=partner_uid)
-            if p_partner:
-                p_targets = _get_targets(p_partner, day_num)
-                p_macros = _split_macros(p_targets)
-                ratio = p_targets['calories'] / targets['calories'] if targets.get('calories') else 1.0
-                scaled = {k: _scale_quantities(v, ratio) if isinstance(v, str) else v for k, v in descriptions.items()}
-                p_meals = _build_meal_text(scaled, p_macros, p_targets)
-                week_start = db.get_next_week_start()
-                db.save_daily_plan(week_start, day_num, p_meals, user_id=partner_uid)
-
+        # Ne pas sauvegarder ici — le wizard stocke le texte côté JS
+        # La synchro partenaire se fait lors du "Générer les courses" (generate_shopping_from_plan)
         return jsonify({"ok": True, "meals": meals})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -1284,6 +1301,25 @@ def _scale_quantities(text: str, ratio: float) -> str:
         scaled = max(5, round(float(m.group(1)) * ratio / 5) * 5)
         return f"{scaled}{m.group(2)}"
     return re.sub(r'(\d+(?:\.\d+)?)\s*(g|ml|cl)\b', _replace, text)
+
+
+def _meal_text_for_shopping(text: str) -> str:
+    """Retourne une version compacte du texte journalier : descriptions seules, sans lignes de macros.
+    Réduit drastiquement la taille envoyée à l'IA pour les courses."""
+    LABELS = {"🌅": "Petit-déj", "🍽": "Déjeuner", "🍎": "Collation", "🌙": "Dîner"}
+    lines_out = []
+    for line in text.split("\n"):
+        # Ligne de titre repas → garder juste l'emoji + label sans les macros
+        matched = next((e for e in LABELS if line.startswith(e)), None)
+        if matched:
+            lines_out.append(f"{matched} {LABELS[matched]}")
+            continue
+        # Ligne de macros (Total estimé) ou vide → ignorer
+        if line.startswith("Total estimé") or not line.strip():
+            continue
+        # Description du plat → garder
+        lines_out.append(line.strip())
+    return "\n".join(lines_out)
 
 
 def _extract_meal_descriptions(text: str) -> dict:
@@ -1416,33 +1452,6 @@ def generate_initial_meals():
         _generate_week_meals_only(p, week_start, user_id=uid, from_day=from_day,
                                    partner_profile=partner_profile, partner_user_id=partner_uid)
 
-        # Génère automatiquement la liste de courses depuis les repas qui viennent d'être créés
-        try:
-            from ai import generate_shopping_from_meals
-            meals_summary = ""
-            for day_num in range(7):
-                text = db.get_daily_plan(week_start, day_num, user_id=uid)
-                if text:
-                    meals_summary += f"{DAYS_FR[day_num]} :\n{text[:1200]}\n\n"
-            if meals_summary:
-                partner_meals_summary = ""
-                if partner_uid:
-                    for day_num in range(7):
-                        pt = db.get_daily_plan(week_start, day_num, user_id=partner_uid)
-                        if pt:
-                            partner_meals_summary += f"{DAYS_FR[day_num]} :\n{pt[:1200]}\n\n"
-                combined = meals_summary
-                if partner_meals_summary:
-                    combined = ("=== Profil 1 ===\n" + meals_summary +
-                                "\n=== Profil 2 ===\n" + partner_meals_summary)
-                shopping = generate_shopping_from_meals(combined, is_couple=bool(partner_uid))
-                db.save_weekly_shopping(week_start, shopping, user_id=uid)
-                if partner_uid:
-                    db.save_weekly_shopping(week_start, shopping, user_id=partner_uid)
-        except Exception:
-            logging.warning("[generate_initial_meals] shopping auto-generation failed (non-fatal): %s",
-                            traceback.format_exc())
-
         return jsonify({"ok": True, "week_start": week_start, "from_day": from_day})
     except Exception as e:
         logging.error("[generate_initial_meals] %s", traceback.format_exc())
@@ -1477,20 +1486,36 @@ def generate_shopping_from_plan():
             continue
         if text:
             db.save_daily_plan(week_start, int(day_num), text, user_id=uid)
-            meals_summary += f"{DAYS_FR[int(day_num)]} :\n{text[:1200]}\n\n"
+            meals_summary += f"{DAYS_FR[int(day_num)]} :\n{_meal_text_for_shopping(text)}\n\n"
 
     if not meals_summary:
         return jsonify({"ok": False, "error": "Aucun repas renseigné"}), 400
 
-    # Mode couple : ajouter les repas du partenaire pour additionner les quantités
+    # Mode couple : resynchroniser les repas du partenaire depuis les repas du profil actif
+    # (garantit que les deux profils ont les mêmes plats, même si le wizard a été utilisé jour par jour)
     main_uid = session["user_id"]
     partner_uid = db.get_partner_user_id(main_uid)
+    # Toujours recalculer depuis le profil principal (pas le partenaire actif)
+    source_uid  = uid  # profil dont on vient de sauvegarder les repas
+    target_uid  = partner_uid if partner_uid != uid else None
+    if not target_uid:
+        # Si on est sur le profil partenaire, la source est le profil principal
+        other = db.get_partner_user_id(uid)  # will be None or main
+        source_uid = session["user_id"]
+        target_uid = other if other != session["user_id"] else None
+
+    if target_uid:
+        p_partner = db.get_profile(user_id=target_uid)
+        if p_partner:
+            p_partner["extra_sports"] = parse_extra_sports(p_partner.get("extra_sports"))
+            _apply_partner_macros_to_existing_meals(p_partner, week_start, target_uid, source_uid)
+
     partner_meals_summary = ""
     if partner_uid:
         for day_num in range(7):
             p_text = db.get_daily_plan(week_start, day_num, user_id=partner_uid)
             if p_text:
-                partner_meals_summary += f"{DAYS_FR[day_num]} :\n{p_text[:1200]}\n\n"
+                partner_meals_summary += f"{DAYS_FR[day_num]} :\n{_meal_text_for_shopping(p_text)}\n\n"
 
     combined_summary = meals_summary
     if partner_meals_summary:

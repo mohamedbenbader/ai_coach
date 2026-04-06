@@ -3274,13 +3274,13 @@
               </div>
               <div class="ob-partner-field">
                 <label>Poids actuel (kg)</label>
-                <input type="number" id="ob-p-weight" placeholder="Ex: 62" min="20" max="300" step="0.5"/>
+                <input type="number" id="ob-p-weight" placeholder="Ex: 62" min="20" max="300" step="0.1"/>
               </div>
             </div>
             <div class="ob-partner-row">
               <div class="ob-partner-field" style="grid-column:1/-1">
                 <label>Poids objectif (kg)</label>
-                <input type="number" id="ob-p-goal-weight" placeholder="Ex: 58" min="20" max="300" step="0.5"/>
+                <input type="number" id="ob-p-goal-weight" placeholder="Ex: 58" min="20" max="300" step="0.1"/>
               </div>
             </div>
 
@@ -6050,6 +6050,11 @@
             ? `🎉 Bienvenue ${obData.name} & ${document.getElementById('ob-p-name').value.trim()} !`
             : `🎉 Profil configuré ! Bienvenue ${obData.name} !`;
           showToast(welcomeMsg);
+          // Naviguer vers Courses et ouvrir directement la vue des repas de la semaine
+          await new Promise((r) => setTimeout(r, 600));
+          goTo('courses');
+          await new Promise((r) => setTimeout(r, 400));
+          openMealWizard();
         } catch (e) {
           showToast("❌ Erreur lors de la génération, réessaie.", true);
           obShowStep(11); // Retour à l'étape couple pour réessayer

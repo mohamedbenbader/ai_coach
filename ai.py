@@ -44,18 +44,25 @@ def _split_macros(t: dict) -> dict:
     return result
 
 
+_MEAL_EMOJIS = ("🌅", "🍽", "🍎", "🌙")
+
+def _clean_desc(text: str) -> str:
+    """Supprime les lignes qui commencent par un emoji de section (évite les doublons de headers)."""
+    lines = [l for l in text.strip().split("\n") if not any(l.startswith(e) for e in _MEAL_EMOJIS)]
+    return "\n".join(lines).strip()
+
 def _build_meal_text(descriptions: dict, macros: dict, targets: dict) -> str:
     """Assemble le texte d'un jour en injectant les macros corrects (pas l'IA)."""
     m = macros
     return (
         f"🌅 Petit-déjeuner ({m['petit_dej']['kcal']}kcal | {m['petit_dej']['p']}g P | {m['petit_dej']['g']}g G | {m['petit_dej']['l']}g L)\n"
-        f"{descriptions.get('petit_dejeuner', '').strip()}\n\n"
+        f"{_clean_desc(descriptions.get('petit_dejeuner', ''))}\n\n"
         f"🍽 Déjeuner ({m['dejeuner']['kcal']}kcal | {m['dejeuner']['p']}g P | {m['dejeuner']['g']}g G | {m['dejeuner']['l']}g L)\n"
-        f"{descriptions.get('dejeuner', '').strip()}\n\n"
+        f"{_clean_desc(descriptions.get('dejeuner', ''))}\n\n"
         f"🍎 Collation 17h30 ({m['collation']['kcal']}kcal | {m['collation']['p']}g P | {m['collation']['g']}g G | {m['collation']['l']}g L)\n"
-        f"{descriptions.get('collation', '').strip()}\n\n"
+        f"{_clean_desc(descriptions.get('collation', ''))}\n\n"
         f"🌙 Dîner ({m['diner']['kcal']}kcal | {m['diner']['p']}g P | {m['diner']['g']}g G | {m['diner']['l']}g L)\n"
-        f"{descriptions.get('diner', '').strip()}\n\n"
+        f"{_clean_desc(descriptions.get('diner', ''))}\n\n"
         f"Total estimé : {targets['calories']}kcal | {targets['protein_g']}g P | {targets['carbs_g']}g G | {targets['fat_g']}g L"
     )
 
@@ -91,8 +98,9 @@ Réponds UNIQUEMENT en JSON :
 def regenerate_single_meal(meal_type: str, day_name: str,
                            remaining: dict, other_meals: str = "") -> str:
     """
-    Régénère un seul repas en respectant :
-    - Le budget macros restant après les autres repas
+    Régénère un seul repas : l'IA génère le plat ET estime ses vrais macros
+    en respectant le budget restant de la journée.
+    Retourne : "{emoji} {label} ({kcal}kcal | {p}g P | {g}g G | {l}g L)\n{description}"
     """
     meal_labels = {
         "petit_dejeuner": ("Petit-déjeuner", "🌅"),
@@ -101,19 +109,40 @@ def regenerate_single_meal(meal_type: str, day_name: str,
         "diner":          ("Dîner",           "🌙"),
     }
     label, emoji = meal_labels.get(meal_type, ("Repas", "🍽"))
-
     avoid = f"\nÉvite de répéter : {other_meals[:200]}" if other_meals else ""
 
-    prompt = f"""Propose uniquement la description du {label} pour {day_name}.{avoid}
+    prompt = f"""Propose un {label} pour {day_name} qui respecte ce budget calorique : ~{remaining['calories']}kcal, ~{remaining['protein_g']}g protéines, ~{remaining['carbs_g']}g glucides, ~{remaining['fat_g']}g lipides.{avoid}
 Cuisine variée et moderne : méditerranéen, asiatique, mexicain, libanais, américain healthy, français revisité.
-Donne un plat concret avec ingrédients et quantités (ex: "Poulet tikka masala 180g + riz basmati 80g + naan 30g").
-Réponds UNIQUEMENT avec la description, sans macros, sans intro, 1-2 lignes max."""
+Ingrédients concrets avec quantités en grammes.
 
-    description = _call(prompt, model=HAIKU, max_tokens=100).strip()
-    # On injecte les macros corrects nous-mêmes
+Réponds UNIQUEMENT en JSON :
+{{"description": "Plat avec ingrédients 180g + ...", "calories": 520, "protein_g": 45, "carbs_g": 50, "fat_g": 14}}"""
+
+    raw = _call(prompt, model=HAIKU, max_tokens=350).strip()
+    description = ""
+    kcal, prot, carbs, fat = (remaining["calories"], remaining["protein_g"],
+                               remaining["carbs_g"],  remaining["fat_g"])
+    try:
+        s, e = raw.find("{"), raw.rfind("}") + 1
+        if s >= 0 and e > s:
+            d = json.loads(raw[s:e])
+            description = str(d.get("description", "")).strip()
+            kcal  = int(d.get("calories",   remaining["calories"]))
+            prot  = int(d.get("protein_g",  remaining["protein_g"]))
+            carbs = int(d.get("carbs_g",    remaining["carbs_g"]))
+            fat   = int(d.get("fat_g",      remaining["fat_g"]))
+    except Exception:
+        pass
+    # Fallback propre si la description est vide ou ressemble à du JSON cassé
+    if not description or description.startswith("{"):
+        description = f"Plat {label.lower()} — ingrédients variés"
+
+    # Si le modèle a répété l'entête emoji, on retire cette ligne
+    if description.startswith(emoji):
+        description = description.split("\n", 1)[-1].strip()
+
     return (
-        f"{emoji} {label} ({remaining['calories']}kcal | {remaining['protein_g']}g P | "
-        f"{remaining['carbs_g']}g G | {remaining['fat_g']}g L)\n{description}"
+        f"{emoji} {label} ({kcal}kcal | {prot}g P | {carbs}g G | {fat}g L)\n{description}"
     )
 
 
@@ -381,35 +410,83 @@ def generate_training_program(profile: dict, phase_number: int = 1, total_phases
             total_extra_sessions += n
     extra_str = ", ".join(sport_parts) if sport_parts else "aucun"
 
-    # Jours de repos choisis par l'utilisateur
+    # ── Pré-calcul du planning jour par jour (Python résout, l'IA exécute) ──
     pref_rest_days = parse_rest_days(profile.get("rest_days", []))
 
-    # Nombre de jours dédiés aux sports additionnels dans la semaine
-    # Les sports peuvent prendre tous les jours non-muscu (pas de repos obligatoire)
-    extra_days = min(total_extra_sessions, 7 - gym_sessions)
-    rest_days  = 7 - gym_sessions - extra_days
+    # File des sessions de sport additionnel à placer
+    sport_queue = []
+    for item in extra_sports:
+        s = item.get("sport", "")
+        n = int(item.get("sessions", 1))
+        if s and s not in ("aucun", None, ""):
+            sport_queue.extend([s] * n)
 
-    # Contrainte de repos pour le prompt
+    week_plan = {}  # day_of_week → {'type': 'GYM'|'SPORT'|'REPOS', 'sport': str|None}
+
     if pref_rest_days:
-        rest_days_str = ", ".join(DAYS_FR[d] for d in pref_rest_days)
-        rest_constraint = (f"- Jours SANS MUSCULATION imposés par l'utilisateur : {rest_days_str}\n"
-                           f"  → PAS de séance salle ces jours-là, mais un sport additionnel y est autorisé\n"
-                           f"  → Si aucun sport assigné, ces jours ont exercises=[]")
-    else:
-        rest_constraint = f"- {rest_days} jour(s) de REPOS → exercises=[] OBLIGATOIRE"
+        # Jours de repos spécifiés : gym interdit dessus
+        pref_set = set(pref_rest_days)
+        gym_candidates = sorted(set(range(7)) - pref_set)
 
-    # Construire la contrainte détaillée pour l'IA
-    if sport_parts:
-        sport_constraint_lines = "\n".join(
-            f"- {sport_labels.get(item['sport'], item['sport'])} : {item['sessions']}×/sem"
-            for item in extra_sports if item.get("sport") not in ("aucun", None, "")
-        )
-        extra_constraint = (
-            f"- Sports additionnels à placer dans la semaine :\n{sport_constraint_lines}\n"
-            f"  (total ~{extra_days} jour(s) dédié(s) aux sports additionnels)"
-        )
+        # Assign gym exactement gym_sessions fois sur les jours disponibles
+        for d in gym_candidates[:gym_sessions]:
+            week_plan[d] = {"type": "GYM", "sport": None}
+
+        # Placer les sports sur les jours de repos d'abord
+        sport_q = list(sport_queue)
+        for d in sorted(pref_set):
+            if sport_q:
+                week_plan[d] = {"type": "SPORT", "sport": sport_q.pop(0)}
+            else:
+                week_plan[d] = {"type": "REPOS", "sport": None}
+
+        # Jours non-repos excédentaires (gym_candidates[gym_sessions:])
+        for d in gym_candidates[gym_sessions:]:
+            if sport_q:
+                week_plan[d] = {"type": "SPORT", "sport": sport_q.pop(0)}
+            else:
+                week_plan[d] = {"type": "REPOS", "sport": None}
     else:
-        extra_constraint = "- Pas de sport additionnel"
+        # Pas de jours de repos spécifiés : espacer les séances de gym uniformément
+        sport_q = list(sport_queue)
+        if gym_sessions >= 7:
+            gym_days = list(range(7))
+        elif gym_sessions > 0:
+            step = 7 / gym_sessions
+            gym_days = sorted(set(int(i * step) for i in range(gym_sessions)))
+            # Combler les collisions éventuelles
+            for d in range(7):
+                if len(gym_days) >= gym_sessions:
+                    break
+                if d not in gym_days:
+                    gym_days.append(d)
+            gym_days = sorted(gym_days[:gym_sessions])
+        else:
+            gym_days = []
+
+        for d in gym_days:
+            week_plan[d] = {"type": "GYM", "sport": None}
+
+        for d in sorted(set(range(7)) - set(gym_days)):
+            if sport_q:
+                week_plan[d] = {"type": "SPORT", "sport": sport_q.pop(0)}
+            else:
+                week_plan[d] = {"type": "REPOS", "sport": None}
+
+    # Construire la chaîne de planning pour le prompt
+    day_schedule_lines = []
+    for d in range(7):
+        info = week_plan[d]
+        if info["type"] == "GYM":
+            day_schedule_lines.append(f"  {DAYS_FR[d]} (day_of_week={d}) → MUSCULATION EN SALLE")
+        elif info["type"] == "SPORT":
+            sl = sport_labels.get(info["sport"], info["sport"])
+            day_schedule_lines.append(f"  {DAYS_FR[d]} (day_of_week={d}) → {sl.upper()}")
+        else:
+            day_schedule_lines.append(f"  {DAYS_FR[d]} (day_of_week={d}) → REPOS (exercises=[])")
+    day_schedule_str = "\n".join(day_schedule_lines)
+
+    pure_rest_days = sum(1 for v in week_plan.values() if v["type"] == "REPOS")
 
     # ── Progression des sports additionnels entre phases ──
     sport_phase_rules = {
@@ -527,19 +604,39 @@ def generate_training_program(profile: dict, phase_number: int = 1, total_phases
             ex = _sport_ex.get(s, _sport_ex["running"])
             ex_lines.append(f"  Exemple {label} :\n" + "\n".join(f"    {e}" for e in ex))
         sport_examples_str = "\n".join(ex_lines)
-        # Exemple JSON d'un jour de sport (premier sport de la liste)
-        first = extra_sports[0]
-        fs = first.get("sport", "")
-        fs_label = sport_labels.get(fs, fs)
-        fs_ex = _sport_ex.get(fs, _sport_ex["running"])
-        fs_ex_json = ", ".join(fs_ex[:2])
-        sport_day_json_example = (
-            f'  {{"week_number": 1, "day_of_week": 2, "session_name": "{fs_label} S1", '
-            f'"session_emoji": "🏃", "exercises": [{fs_ex_json}]}},\n'
-        )
     else:
         sport_examples_str = "  (Pas de sport additionnel)"
-        sport_day_json_example = ""
+
+    # Générer les exemples JSON depuis le planning réel (2 premières entrées intéressantes)
+    _emoji_map = {"GYM": "💪", "REPOS": "😴"}
+    _sport_emoji = {"running": "🏃", "velo": "🚴", "natation": "🏊", "yoga": "🧘",
+                    "pilates": "🧘", "football": "⚽", "arts_martiaux": "🥋",
+                    "danse": "💃", "crossfit": "🏋️", "tennis": "🎾"}
+    ex_entries = []
+    for day_ex, info_ex in week_plan.items():
+        if info_ex["type"] == "GYM":
+            ex_entries.append(
+                f'  {{"week_number": 1, "day_of_week": {day_ex}, "session_name": "Push S1 — Pec/Épaules/Triceps", '
+                f'"session_emoji": "💪", "exercises": [{{"name": "Développé couché barre", "sets": "3x12", "rest": "90s"}}]}}'
+            )
+        elif info_ex["type"] == "SPORT":
+            sp = info_ex["sport"]
+            sp_label = sport_labels.get(sp, sp)
+            sp_emoji = _sport_emoji.get(sp, "🏃")
+            sp_ex = _sport_ex.get(sp, _sport_ex["running"])
+            sp_ex_json = ", ".join(sp_ex[:2])
+            ex_entries.append(
+                f'  {{"week_number": 1, "day_of_week": {day_ex}, "session_name": "{sp_label} S1", '
+                f'"session_emoji": "{sp_emoji}", "exercises": [{sp_ex_json}]}}'
+            )
+        elif info_ex["type"] == "REPOS":
+            ex_entries.append(
+                f'  {{"week_number": 1, "day_of_week": {day_ex}, "session_name": "REPOS", '
+                f'"session_emoji": "😴", "exercises": []}}'
+            )
+        if len(ex_entries) >= 3:
+            break
+    json_example_str = ",\n".join(ex_entries) + ",\n"
 
     prompt = f"""Crée un programme d'entraînement hebdomadaire personnalisé pour :
 - {profile.get('name')}, {profile.get('age')} ans, {sexe}
@@ -547,19 +644,17 @@ def generate_training_program(profile: dict, phase_number: int = 1, total_phases
 - Objectif : {goal} (cible : {profile.get('goal_weight_kg')} kg)
 - Niveau sportif : {fitness_str}
 - Type de travail : {job_str}
-- Séances salle/semaine : {gym_sessions}
-- Sports additionnels : {extra_str}
+
+PLANNING HEBDOMADAIRE FIXE — RESPECTER EXACTEMENT CE PLANNING, JOUR PAR JOUR :
+{day_schedule_str}
+→ Génère UNIQUEMENT le type de séance indiqué pour chaque jour. Ne change pas la structure.
 
 PHASE ACTUELLE : {phase_desc}{sport_progression_hint}
 → Adapte les charges EN SALLE et les durées/intensités des sports additionnels selon les règles ci-dessus.
   La structure S1→S4 (Fondation→Volume→Intensité→Décharge) reste identique mais à l'intensité de la phase {phase_number}.
 
-Contraintes STRICTES :
-- Exactement {gym_sessions} jours de musculation en salle
-{extra_constraint}
-{rest_constraint}
-- Répartition optimale sur la semaine (pas 2 jours muscu consécutifs si possible)
-- Adapter les exercices à l'objectif ({goal})
+Règles sur le contenu des exercices :
+- Adapter les exercices salle à l'objectif ({goal})
 
 RÈGLE ABSOLUE sur exercises[] :
 • Jours MUSCULATION en salle : exercises avec au moins 5 exercices détaillés, format :
@@ -582,12 +677,7 @@ GÉNÈRE 4 SEMAINES PROGRESSIVES (28 objets au total) avec "week_number" de 1 à
 
 JSON valide uniquement, 28 objets :
 [
-  {{"week_number": 1, "day_of_week": 0, "session_name": "Push S1 — Pec/Épaules/Triceps", "session_emoji": "💪",
-    "exercises": [{{"name": "Développé couché barre", "sets": "3x12", "rest": "90s"}}]}},
-  {{"week_number": 2, "day_of_week": 0, "session_name": "Push S2 — Pec/Épaules/Triceps", "session_emoji": "💪",
-    "exercises": [{{"name": "Développé couché barre", "sets": "4x10", "rest": "2min"}}]}},
-{sport_day_json_example}  {{"week_number": 1, "day_of_week": 4, "session_name": "REPOS", "session_emoji": "😴", "exercises": []}},
-  ...
+{json_example_str}  ...
 ]"""
 
     raw = _call(prompt, model=HAIKU, max_tokens=8000)
@@ -719,8 +809,12 @@ def generate_shopping_from_meals(meals_summary: str, is_couple: bool = False) ->
     else:
         instructions = "Génère la liste de courses complète groupée par catégorie avec quantités pour 1 personne."
 
+    # Limite augmentée pour le mode couple (2 profils × 7 jours ≈ 5000 chars)
+    char_limit = 7000 if is_couple else 3500
+    max_tok = 1200 if is_couple else 800
+
     prompt = f"""Voici les repas planifiés pour la semaine :
-{meals_summary[:3000]}
+{meals_summary[:char_limit]}
 
 {instructions}
 Concis, pas d'intro :
@@ -732,6 +826,6 @@ Féculents :
 Fruits :
 Épicerie :"""
 
-    return _call(prompt, model=HAIKU, max_tokens=800)
+    return _call(prompt, model=HAIKU, max_tokens=max_tok)
 
 
